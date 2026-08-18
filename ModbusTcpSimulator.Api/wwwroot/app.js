@@ -87,12 +87,14 @@ document.addEventListener('keydown', e => {
 // ────────────────────────────────────────────────────────────
 let _confirmResolve = null;
 
-function confirmAction(title, message, btnLabel) {
+function confirmAction(title, message, btnLabel, btnClass) {
   return new Promise(resolve => {
     _confirmResolve = resolve;
     document.getElementById('confirm-title').textContent = title;
     document.getElementById('confirm-message').textContent = message;
-    document.getElementById('confirm-ok-btn').textContent = btnLabel || 'Delete';
+    const okBtn = document.getElementById('confirm-ok-btn');
+    okBtn.textContent = btnLabel || 'Delete';
+    okBtn.className = 'btn ' + (btnClass || 'btn-danger');
     openModal('modal-confirm');
   });
 }
@@ -561,6 +563,8 @@ async function refreshDashboard() {
     document.getElementById('dash-host').textContent = serverStatus.modbusHost;
     document.getElementById('dash-port').textContent = serverStatus.modbusPort;
     document.getElementById('dash-ip').textContent = serverStatus.localIp || '127.0.0.1';
+    document.getElementById('dash-quick-host').textContent = serverStatus.localIp || 'localhost';
+    document.getElementById('dash-quick-port').textContent = serverStatus.modbusPort;
 
     // Update connection bar in header
     const connIp = serverStatus.localIp || '127.0.0.1';
@@ -1717,6 +1721,36 @@ function copyMbpollCommand(unitId, regType, startAddr, endAddr, dataType) {
 }
 
 // ────────────────────────────────────────────────────────────
+// Reset Database
+// ────────────────────────────────────────────────────────────
+function openResetModal() {
+  document.getElementById('reset-confirm-input').value = '';
+  document.getElementById('reset-ok-btn').disabled = true;
+  openModal('modal-reset');
+  setTimeout(() => document.getElementById('reset-confirm-input').focus(), 100);
+}
+
+function checkResetInput() {
+  const val = document.getElementById('reset-confirm-input').value.trim();
+  document.getElementById('reset-ok-btn').disabled = val !== 'destroy';
+}
+
+async function confirmReset() {
+  const val = document.getElementById('reset-confirm-input').value.trim();
+  if (val !== 'destroy') return;
+  closeModal('modal-reset');
+  try {
+    await api('POST', '/api/reset', { confirm: 'destroy' });
+    toast('Database reset — all data deleted', 'success');
+    await loadUnits();
+    await loadAllRegisters();
+    await loadAnomalies();
+    renderLiveTable();
+    refreshDashboard();
+  } catch (e) { toast('Reset failed: ' + e.message, 'error'); }
+}
+
+// ────────────────────────────────────────────────────────────
 // Export / Import
 // ────────────────────────────────────────────────────────────
 async function exportConfig() {
@@ -1767,7 +1801,9 @@ async function importConfig(input) {
 
   if (!await confirmAction(
     'Import Configuration',
-    `Import ${payload.units?.length || 0} units, ${payload.registers?.length || 0} registers, ${payload.anomalies?.length || 0} anomalies?\n\nExisting entries with the same name/ID will be skipped.`
+    `Import ${payload.units?.length || 0} units, ${payload.registers?.length || 0} registers, ${payload.anomalies?.length || 0} anomalies?\n\nExisting entries with the same name/ID will be skipped.`,
+    'Import',
+    'btn-primary'
   )) return;
 
   try {

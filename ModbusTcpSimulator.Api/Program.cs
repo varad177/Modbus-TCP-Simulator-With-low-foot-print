@@ -1,4 +1,6 @@
 using System.Net.WebSockets;
+using Dapper;
+using Microsoft.Data.Sqlite;
 using ModbusTcpSimulator.Api.Endpoints;
 using ModbusTcpSimulator.Api.Services;
 using ModbusTcpSimulator.Core.Persistence;
@@ -111,6 +113,25 @@ try
     // ── Health Check ─────────────────────────────────────────────────────────
     app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
 
+    // ── Reset Database ──────────────────────────────────────────────────────
+    app.MapPost("/api/reset", async (HttpContext ctx, SimulationWorker worker, AnomalyEngine engine) =>
+    {
+        var body = await ctx.Request.ReadFromJsonAsync<ResetRequest>();
+        if (body?.Confirm != "destroy")
+            return Results.BadRequest(new { error = "Type 'destroy' to confirm" });
+
+        using var conn = new SqliteConnection(connectionString);
+        await conn.OpenAsync();
+        await conn.ExecuteAsync("DELETE FROM AnomalyConfigurations");
+        await conn.ExecuteAsync("DELETE FROM RegisterConfigurations");
+        await conn.ExecuteAsync("DELETE FROM SimulatedUnits");
+
+        await worker.ReloadAsync();
+        await engine.ReloadSchedulesAsync();
+
+        return Results.Ok(new { message = "All units, registers, and anomalies deleted" });
+    });
+
     // ── SPA Fallback ──────────────────────────────────────────────────────────────
     app.MapFallbackToFile("index.html");
 
@@ -124,3 +145,5 @@ finally
 {
     Log.CloseAndFlush();
 }
+
+record ResetRequest(string Confirm);

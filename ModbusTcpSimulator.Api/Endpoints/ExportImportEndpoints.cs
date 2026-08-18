@@ -42,7 +42,8 @@ public static class ExportImportEndpoints
             IUnitRepository unitRepo,
             IRegisterRepository regRepo,
             IAnomalyRepository anomalyRepo,
-            SimulationWorker worker) =>
+            SimulationWorker worker,
+            AnomalyEngine engine) =>
         {
             ExportPayload? payload;
             try
@@ -130,10 +131,10 @@ public static class ExportImportEndpoints
                 regsImported++;
             }
 
-            // ── 3. Import anomalies (skip by Name) ──────────────────────
+            // ── 3. Import anomalies (skip by composite key) ──────────
             var existingAnomalies = (await anomalyRepo.GetAllAsync()).ToList();
-            var existingAnomalyNames = new HashSet<string>(
-                existingAnomalies.Select(a => a.Name), StringComparer.OrdinalIgnoreCase);
+            var existingAnomalyKeys = new HashSet<string>(
+                existingAnomalies.Select(a => $"{a.SimulatedUnitId}:{a.RegisterType}:{a.StartAddress}:{a.EndAddress}:{a.TriggerMode}"));
 
             foreach (var anomaly in payload.Anomalies)
             {
@@ -143,7 +144,8 @@ public static class ExportImportEndpoints
                     continue;
                 }
 
-                if (existingAnomalyNames.Contains(anomaly.Name))
+                var compositeKey = $"{mappedAnomalyUnitId}:{anomaly.RegisterType}:{anomaly.StartAddress}:{anomaly.EndAddress}:{anomaly.TriggerMode}";
+                if (existingAnomalyKeys.Contains(compositeKey))
                 {
                     anomaliesSkipped++;
                     continue;
@@ -169,12 +171,13 @@ public static class ExportImportEndpoints
                     ScheduleIntervalSeconds = anomaly.ScheduleIntervalSeconds,
                     IsScheduleEnabled = anomaly.IsScheduleEnabled
                 });
-                existingAnomalyNames.Add(anomaly.Name);
+                existingAnomalyKeys.Add(compositeKey);
                 anomaliesImported++;
             }
 
-            // ── Reload simulation worker once ────────────────────────────
+            // ── Reload simulation worker + anomaly schedules ────────
             await worker.ReloadAsync();
+            await engine.ReloadSchedulesAsync();
 
             return Results.Ok(new
             {

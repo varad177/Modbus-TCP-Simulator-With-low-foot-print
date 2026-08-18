@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "dgSpecHash": "bGBaCWhSVOQ=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Varad Dhumale\\Desktop\\CFDH Simulator\\ModbusTcpSimulator.Core\\ModbusTcpSimulator.Core.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Varad Dhumale\\.nuget\\packages\\dapper\\2.1.79\\dapper.2.1.79.nupkg.sha512",
+    "C:\\Users\\Varad Dhumale\\.nuget\\packages\\microsoft.data.sqlite\\10.0.11\\microsoft.data.sqlite.10.0.11.nupkg.sha512",
+    "C:\\Users\\Varad Dhumale\\.nuget\\packages\\microsoft.data.sqlite.core\\10.0.11\\microsoft.data.sqlite.core.10.0.11.nupkg.sha512",
+    "C:\\Users\\Varad Dhumale\\.nuget\\packages\\nmodbus\\3.0.83\\nmodbus.3.0.83.nupkg.sha512",
+    "C:\\Users\\Varad Dhumale\\.nuget\\packages\\sqlitepclraw.bundle_e_sqlite3\\2.1.12\\sqlitepclraw.bundle_e_sqlite3.2.1.12.nupkg.sha512",
+    "C:\\Users\\Varad Dhumale\\.nuget\\packages\\sqlitepclraw.core\\2.1.12\\sqlitepclraw.core.2.1.12.nupkg.sha512",
+    "C:\\Users\\Varad Dhumale\\.nuget\\packages\\sqlitepclraw.lib.e_sqlite3\\2.1.12\\sqlitepclraw.lib.e_sqlite3.2.1.12.nupkg.sha512",
+    "C:\\Users\\Varad Dhumale\\.nuget\\packages\\sqlitepclraw.provider.e_sqlite3\\2.1.12\\sqlitepclraw.provider.e_sqlite3.2.1.12.nupkg.sha512"
+  ],
+  "logs": []
+}

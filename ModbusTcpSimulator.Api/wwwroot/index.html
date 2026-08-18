@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Modbus TCP Simulator — CFDH Industrial</title>
+  <meta name="description" content="Production-quality Modbus TCP simulator with live WebSocket register monitoring, anomaly injection, and multi-unit support.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="app.css?v=1.0.11">
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ── Top Bar ───────────────────────────────────────────── -->
+  <header class="top-bar">
+    <a class="top-bar__logo" href="#">
+      <div class="top-bar__logo-icon">M</div>
+      Modbus TCP Simulator
+    </a>
+    <div class="top-bar__sep"></div>
+    <span class="top-bar__title">CFDH Industrial</span>
+    <div class="top-bar__spacer"></div>
+
+    <!-- Connection info copy bar -->
+    <div class="connection-bar" id="connection-bar" onclick="copyConnectionInfo()" title="Click to copy Modbus TCP connection address">
+      <span class="connection-bar__label">Modbus TCP</span>
+      <span class="connection-bar__value" id="conn-display">—:502</span>
+      <span class="connection-bar__icon" style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--c-cyan)">Copy</span>
+    </div>
+
+    <div id="sim-status-badge" class="status-badge stopped">● Stopped</div>
+    <div class="top-bar__ws-indicator" id="ws-indicator">
+      <div class="ws-dot" id="ws-dot"></div>
+      <span id="ws-label">WebSocket</span>
+    </div>
+  </header>
+
+  <!-- ── Sidebar ──────────────────────────────────────────── -->
+  <nav class="sidebar">
+    <div class="nav-section-label">Overview</div>
+    <button class="nav-item active" data-screen="dashboard" onclick="navigate(this)" id="nav-dashboard">
+      Dashboard
+    </button>
+
+    <div class="nav-section-label" style="margin-top:12px;">Monitoring</div>
+    <button class="nav-item" data-screen="livevalues" onclick="navigate(this)" id="nav-livevalues">
+      Live Values
+    </button>
+
+    <div class="nav-section-label" style="margin-top:12px;">Operations</div>
+    <button class="nav-item" data-screen="anomalies" onclick="navigate(this)" id="nav-anomalies">
+      Anomalies
+      <span class="nav-item__badge" id="nav-badge-anomalies" style="display:none">0</span>
+    </button>
+  </nav>
+
+  <!-- ── Main Content ─────────────────────────────────────── -->
+  <main class="main-content">
+
+    <!-- ──────── DASHBOARD ──────── -->
+    <section id="screen-dashboard" class="screen active">
+      <div class="page-header">
+        <div><h1>Dashboard</h1><p>Simulator overview and control</p></div>
+        <div class="action-row">
+          <button class="btn btn-success" onclick="startSimulator()">Start</button>
+          <button class="btn btn-ghost" onclick="stopSimulator()">Stop</button>
+          <button class="btn btn-ghost btn-sm" onclick="refreshDashboard()">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-grid">
+        <div class="stat-card accent-cyan">
+          <div class="stat-card__label">Unit IDs</div>
+          <div class="stat-card__value" id="stat-units">—</div>
+          <div class="stat-card__sub">Simulated devices</div>
+        </div>
+        <div class="stat-card accent-emerald">
+          <div class="stat-card__label">Registers</div>
+          <div class="stat-card__value" id="stat-registers">—</div>
+          <div class="stat-card__sub">Configured entries</div>
+        </div>
+        <div class="stat-card accent-red">
+          <div class="stat-card__label">Active Anomalies</div>
+          <div class="stat-card__value" id="stat-anomalies-active">—</div>
+          <div class="stat-card__sub">Currently injecting</div>
+        </div>
+        <div class="stat-card accent-purple">
+          <div class="stat-card__label">Total Anomalies</div>
+          <div class="stat-card__value" id="stat-anomalies-total">—</div>
+          <div class="stat-card__sub">Configured</div>
+        </div>
+        <div class="stat-card accent-amber">
+          <div class="stat-card__label">WS Clients</div>
+          <div class="stat-card__value" id="stat-ws-clients">—</div>
+          <div class="stat-card__sub">Connected browsers</div>
+        </div>
+      </div>
+
+      <!-- Server info + quick guide -->
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><h2>Modbus TCP Server</h2></div>
+          <div class="card-body">
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="info-item__label">Host</span>
+                <div class="info-item__copy" onclick="copyText(this, document.getElementById('dash-host').textContent)" title="Click to copy host">
+                  <span class="info-item__value" id="dash-host">—</span>
+                  <span class="text-xs text-dim">Copy</span>
+                </div>
+              </div>
+              <div class="info-item">
+                <span class="info-item__label">Port</span>
+                <div class="info-item__copy" onclick="copyText(this, document.getElementById('dash-port').textContent)" title="Click to copy port">
+                  <span class="info-item__value" id="dash-port">—</span>
+                  <span class="text-xs text-dim">Copy</span>
+                </div>
+              </div>
+              <div class="info-item">
+                <span class="info-item__label">Local IP</span>
+                <div class="info-item__copy" onclick="copyText(this, document.getElementById('dash-ip').textContent)" title="Click to copy IP">
+                  <span class="info-item__value" id="dash-ip">—</span>
+                  <span class="text-xs text-dim">Copy</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h2>Quick Start</h2></div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:4px;">
+            <div class="quick-step"><span class="quick-step__num">1</span> Go to <strong>Units & Registers</strong> and create a Unit ID</div>
+            <div class="quick-step"><span class="quick-step__num">2</span> Add register ranges with value generation</div>
+            <div class="quick-step"><span class="quick-step__num">3</span> Switch to <strong>Live Values</strong> to watch real-time data</div>
+            <div class="quick-step"><span class="quick-step__num">4</span> Create & trigger anomalies from the <strong>Anomalies</strong> page</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────── LIVE VALUES ──────── -->
+    <section id="screen-livevalues" class="screen">
+      <div class="page-header">
+        <div><h1>Live Values</h1><p>Real-time register values via WebSocket</p></div>
+        <div class="action-row">
+          <button class="btn btn-primary" onclick="openAddUnit()">+ Add Unit</button>
+          <button class="btn btn-ghost" onclick="openAddRegister()">+ Add Register</button>
+          <span class="badge badge-cyan" id="live-register-count">0 registers</span>
+          <button class="btn btn-amber btn-sm" onclick="clearLiveTable()" title="Clears the live values display only — does NOT delete registers or stop the simulator">Clear</button>
+          <span class="text-xs text-muted" style="margin-left:2px;white-space:nowrap">Display only</span>
+          <div class="action-divider"></div>
+          <button class="btn btn-ghost btn-sm" onclick="exportConfig()" title="Export all units, registers, and anomalies to a JSON file">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('import-file-input').click()" title="Import configuration from a JSON file (merges, skips duplicates)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Import
+          </button>
+          <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="importConfig(this)">
+        </div>
+      </div>
+
+      <!-- Live Values Page -->
+
+      <div class="info-strip">
+        <strong>Addressing:</strong> Addresses are zero-based — e.g. address <code>0</code> = Modicon <code>40001</code> (Holding Register), <code>30001</code> (Input Register), <code>1</code> (Coil), <code>10001</code> (Discrete Input).
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>Register Values</h2>
+          <div class="flex items-center gap-2">
+            <div class="ws-dot" id="live-ws-dot" style="width:8px;height:8px"></div>
+            <span class="text-sm text-muted" id="live-ws-label">Connecting…</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Unit ID</th>
+                <th>Type</th>
+                <th>Address</th>
+                <th>Current Value</th>
+                <th>Trend</th>
+                <th>State</th>
+                <th>Inline Anomaly Controls</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="live-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────── ANOMALIES ──────── -->
+    <section id="screen-anomalies" class="screen">
+      <div class="page-header">
+        <div><h1>Anomalies</h1><p>Create, schedule, and trigger register anomalies</p></div>
+        <button class="btn btn-primary" onclick="openAddAnomaly()">+ Create Anomaly</button>
+      </div>
+
+      <!-- Active anomalies -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Active Anomalies</h2>
+          <span class="badge badge-red" id="active-anomaly-count-badge">0</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Unit</th><th>Register</th><th>Remaining</th></tr>
+            </thead>
+            <tbody id="active-anomalies-tbody">
+              <tr><td colspan="4" class="empty-state text-muted" style="padding:12px">No anomalies active</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- All anomalies -->
+      <div class="card">
+        <div class="card-header">
+          <h2>All Anomalies</h2>
+          <span class="badge badge-cyan" id="anomalies-count-badge">0</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Target</th>
+                <th>Direction</th>
+                <th>Pattern</th>
+                <th>Duration</th>
+                <th>Trigger</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="anomalies-tbody">
+              <tr><td colspan="8" class="empty-state">No anomalies configured.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main><!-- /main-content -->
+</div><!-- /app-shell -->
+
+<!-- ──────────────── MODALS ──────────────── -->
+
+<!-- Add Unit Modal -->
+<div class="modal-backdrop" id="modal-unit">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-unit-title">Add Unit ID</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modal-unit')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="unit-edit-id">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Unit ID <span style="color:var(--c-red)">*</span></label>
+          <input type="number" id="unit-id-input" min="1" max="247" placeholder="1–247">
+          <span class="form-hint">Modbus spec: 1–247</span>
+        </div>
+        <div class="form-group">
+          <label>Label (optional)</label>
+          <input type="text" id="unit-label-input" placeholder="e.g. Temperature Sensor">
+        </div>
+        <div class="form-group">
+          <label>Enabled</label>
+          <select id="unit-enabled-input">
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-unit')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveUnit()">Save Unit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Register Modal -->
+<div class="modal-backdrop" id="modal-register">
+  <div class="modal" style="width:620px">
+    <div class="modal-header">
+      <h3 id="modal-reg-title">Add Register</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modal-register')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="reg-edit-id">
+
+      <!-- Single vs Range toggle -->
+      <div style="display:flex;gap:8px;margin-bottom:2px">
+        <button id="reg-mode-single" class="btn btn-primary btn-sm" onclick="setRegMode('single')">Single Register</button>
+        <button id="reg-mode-range" class="btn btn-ghost btn-sm" onclick="setRegMode('range')">Address Range</button>
+        <span id="reg-addr-preview" class="port-tag" style="margin-left:auto"></span>
+      </div>
+
+      <!-- Bool notice (hidden by default) -->
+      <div id="reg-bool-notice" class="bool-notice" style="display:none">
+        Notice: Coil/Discrete Input registers are boolean (0/1). Data type locked to Bool.
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Unit ID <span style="color:var(--c-red)">*</span></label>
+          <select id="reg-unit-input"></select>
+        </div>
+        <div class="form-group">
+          <label>Register Type</label>
+          <select id="reg-type-input" onchange="onRegisterTypeChange()">
+            <option value="HoldingRegister">Holding Register (HR)</option>
+            <option value="InputRegister">Input Register (IR)</option>
+            <option value="Coil">Coil</option>
+            <option value="DiscreteInput">Discrete Input (DI)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Address <span style="color:var(--c-red)">*</span></label>
+          <input type="number" id="reg-start-input" min="0" max="65535" placeholder="e.g. 100" oninput="updateRegPreview()">
+        </div>
+        <div class="form-group" id="reg-end-group" style="display:none">
+          <label>End Address</label>
+          <input type="number" id="reg-end-input" min="0" max="65535" placeholder="e.g. 109" oninput="updateRegPreview()">
+        </div>
+        <p class="text-xs text-muted" style="margin-top:-4px;margin-bottom:8px">
+          Zero-based: address <code>0</code> = Modicon <code>40001</code> (HR), <code>30001</code> (IR), <code>1</code> (Coil), <code>10001</code> (DI)
+        </p>
+        <div class="form-group" id="reg-gen-group">
+          <label>Value Generation</label>
+          <select id="reg-gen-input" onchange="onGenTypeChange()">
+            <option value="Random">Random (between Min/Max)</option>
+            <option value="Constant">Constant</option>
+            <option value="Increment">Increment (counts up)</option>
+            <option value="Decrement">Decrement (counts down)</option>
+            <option value="Sine">Sine Wave</option>
+          </select>
+        </div>
+        <div class="form-group" id="reg-min-group">
+          <label>Min Value</label>
+          <input type="number" id="reg-min-input" value="0" step="any">
+        </div>
+        <div class="form-group" id="reg-max-group">
+          <label>Max Value</label>
+          <input type="number" id="reg-max-input" value="100" step="any">
+        </div>
+        <div class="form-group" id="reg-constant-group" style="display:none">
+          <label>Constant Value</label>
+          <input type="number" id="reg-constant-input" value="50" step="any">
+        </div>
+        <div class="form-group" id="reg-step-group" style="display:none">
+          <label>Step Size</label>
+          <input type="number" id="reg-step-input" value="1" step="any">
+        </div>
+        <div class="form-group" id="reg-period-group" style="display:none">
+          <label>Sine Period (seconds)</label>
+          <input type="number" id="reg-period-input" value="60" step="any">
+        </div>
+
+        <!-- Collapsible Advanced Settings -->
+        <details class="advanced-settings" id="reg-advanced-details">
+          <summary>Advanced Register Settings</summary>
+          <div class="form-grid">
+            <div class="form-group" id="reg-datatype-group">
+              <label>Data Type</label>
+              <select id="reg-datatype-input" onchange="updateRegPreview()">
+                <option value="UInt16">UINT16 (1 register)</option>
+                <option value="Int16">INT16 (1 register)</option>
+                <option value="UInt32">UINT32 (2 registers)</option>
+                <option value="Int32">INT32 (2 registers)</option>
+                <option value="Float32" selected>FLOAT32 (2 registers)</option>
+                <option value="UInt64">UINT64 (4 registers)</option>
+                <option value="Int64">INT64 (4 registers)</option>
+                <option value="Float64">FLOAT64 (4 registers)</option>
+                <option value="Bool">BOOL (1 register)</option>
+              </select>
+            </div>
+            <div class="form-group" id="reg-byteorder-group">
+              <label>Byte Order</label>
+              <select id="reg-byteorder-input">
+                <option value="BigEndian">Big Endian (default)</option>
+                <option value="LittleEndian">Little Endian</option>
+                <option value="WordSwap">Word Swap</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Update Every</label>
+              <select id="reg-interval-input">
+                <option value="100">100 ms</option>
+                <option value="500">500 ms</option>
+                <option value="1000" selected>1 second</option>
+                <option value="5000">5 seconds</option>
+                <option value="10000">10 seconds</option>
+                <option value="60000">1 minute</option>
+              </select>
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-register')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveRegister()">Save Register</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Anomaly Modal -->
+<div class="modal-backdrop" id="modal-anomaly">
+  <div class="modal" style="width:640px">
+    <div class="modal-header">
+      <h3 id="modal-anomaly-title">Create Anomaly</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modal-anomaly')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="anomaly-edit-id">
+      <div class="form-grid">
+        <div class="form-group full">
+          <label>Anomaly Name <span style="color:var(--c-red)">*</span></label>
+          <input type="text" id="anomaly-name-input" placeholder="e.g. Temperature Spike">
+        </div>
+        <div class="form-group">
+          <label>Target Unit ID <span style="color:var(--c-red)">*</span></label>
+          <select id="anomaly-unit-input" onchange="onAnomalyUnitChange()"></select>
+        </div>
+        <div class="form-group">
+          <label>Register Type</label>
+          <select id="anomaly-regtype-input" onchange="onAnomalyRegTypeChange()">
+            <option value="HoldingRegister">Holding Register</option>
+            <option value="InputRegister">Input Register</option>
+            <option value="Coil">Coil</option>
+            <option value="DiscreteInput">Discrete Input</option>
+          </select>
+        </div>
+
+        <!-- Register picker dropdown -->
+        <div class="form-group full" id="anomaly-register-picker-group">
+          <label>Target Register <span class="form-hint" style="display:inline">(select from configured registers)</span></label>
+          <select id="anomaly-register-picker" onchange="onAnomalyRegisterPicked()">
+            <option value="">— Select a register —</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Start Address</label>
+          <input type="number" id="anomaly-start-input" min="0" max="65535" value="0" readonly>
+        </div>
+        <div class="form-group">
+          <label>End Address</label>
+          <input type="number" id="anomaly-end-input" min="0" max="65535" value="0" readonly>
+        </div>
+
+        <!-- Bool notice for anomalies -->
+        <div id="anomaly-bool-notice" class="bool-notice" style="display:none">
+          ⚠️ Coil/Discrete Input anomalies: only Custom Value (0 or 1) with Instant Spike is allowed.
+        </div>
+
+        <div class="form-section-label">Anomaly Behavior</div>
+
+        <div class="form-group" id="anomaly-direction-group">
+          <label>Direction</label>
+          <select id="anomaly-direction-input" onchange="onAnomalyDirectionChange()">
+            <option value="Increase">Increase</option>
+            <option value="Decrease">Decrease</option>
+            <option value="CustomValue">Custom Value</option>
+          </select>
+        </div>
+        <div class="form-group" id="anomaly-bool-value-group" style="display:none">
+          <label>Custom Boolean Value</label>
+          <select id="anomaly-bool-value-input">
+            <option value="1">ON (1)</option>
+            <option value="0">OFF (0)</option>
+          </select>
+        </div>
+        <div class="form-group" id="anomaly-custom-type-group" style="display:none">
+          <label>Custom Value Type</label>
+          <select id="anomaly-custom-type-input" onchange="onAnomalyCustomTypeChange()">
+            <option value="Constant">Constant Value</option>
+            <option value="Random">Random Range per Register</option>
+          </select>
+        </div>
+        <div class="form-group" id="anomaly-amount-group">
+          <label id="anomaly-amount-label">Amount (%)</label>
+          <input type="number" id="anomaly-amount-input" value="50" step="any" placeholder="e.g. 50 for +50%">
+        </div>
+        <div class="form-group" id="anomaly-custom-min-group" style="display:none">
+          <label>Custom Min</label>
+          <input type="number" id="anomaly-custom-min" value="0" step="any">
+        </div>
+        <div class="form-group" id="anomaly-custom-max-group" style="display:none">
+          <label>Custom Max</label>
+          <input type="number" id="anomaly-custom-max" value="100" step="any">
+        </div>
+
+        <!-- Collapsible Advanced Settings -->
+        <details class="advanced-settings" id="anomaly-advanced-details">
+          <summary>Advanced Anomaly Settings</summary>
+          <div class="form-grid">
+            <div class="form-group" id="anomaly-duration-group">
+              <label>Duration (seconds)</label>
+              <input type="number" id="anomaly-duration-input" value="10" min="1">
+            </div>
+            <div class="form-group" id="anomaly-pattern-group">
+              <label>Pattern</label>
+              <select id="anomaly-pattern-input">
+                <option value="InstantSpike">Instant Spike</option>
+                <option value="GradualRamp">Gradual Ramp</option>
+                <option value="Oscillation">Oscillation</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Recovery</label>
+              <select id="anomaly-recovery-input">
+                <option value="Immediate">Immediate</option>
+                <option value="Gradual">Gradual</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Trigger Mode</label>
+              <select id="anomaly-trigger-input" onchange="onTriggerModeChange()">
+                <option value="OnDemand">On Demand (manual)</option>
+                <option value="Scheduled">Scheduled (auto)</option>
+              </select>
+            </div>
+            <div class="form-group" id="anomaly-schedule-group" style="display:none">
+              <label>Schedule Interval</label>
+              <select id="anomaly-schedule-interval-input" onchange="onScheduleIntervalChange()">
+                <option value="60">Every 1 minute</option>
+                <option value="300">Every 5 minutes</option>
+                <option value="600" selected>Every 10 minutes</option>
+                <option value="1800">Every 30 minutes</option>
+                <option value="3600">Every 1 hour</option>
+                <option value="custom">Custom Interval (seconds)</option>
+              </select>
+            </div>
+            <div class="form-group" id="anomaly-schedule-custom-group" style="display:none">
+              <label>Custom Interval (seconds) <span style="color:var(--c-red)">*</span></label>
+              <input type="number" id="anomaly-schedule-custom-sec-input" placeholder="e.g. 10 or 0.5" min="0.05" step="any">
+            </div>
+            <div class="form-group" id="anomaly-schedule-enabled-group" style="display:none">
+              <label>Schedule Enabled</label>
+              <select id="anomaly-schedule-enabled-input">
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-anomaly')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAnomaly()">Save Anomaly</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- Confirm Modal -->
+<div class="modal-backdrop" id="modal-confirm">
+  <div class="modal" style="width:420px">
+    <div class="modal-header">
+      <h3 id="confirm-title">Are you sure?</h3>
+      <button class="btn btn-ghost btn-icon" onclick="confirmCancel()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="confirm-message" style="color:var(--c-text-secondary);font-size:14px;"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="confirmCancel()">Cancel</button>
+      <button class="btn btn-danger" id="confirm-ok-btn" onclick="confirmOk()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=1.0.9"></script>
+</body>
+</html>

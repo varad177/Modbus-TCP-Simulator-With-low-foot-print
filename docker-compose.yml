@@ -1,0 +1,21 @@
+services:
+  modbus-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8090:8080"     # Web UI + REST API
+      - "502:502"       # Modbus TCP
+    volumes:
+      - simulator-data:/app/data
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - Modbus__Host=0.0.0.0
+      - Modbus__Port=502
+      - Database__ConnectionString=Data Source=/app/data/simulator.db
+      - WebSocket__BroadcastIntervalMs=250
+      - Serilog__MinimumLevel__Default=Information
+    restart: unless-stopped
+
+volumes:
+  simulator-data:

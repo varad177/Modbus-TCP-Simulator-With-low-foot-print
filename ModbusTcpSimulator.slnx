@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="ModbusTcpSimulator.Api/ModbusTcpSimulator.Api.csproj" />
+  <Project Path="ModbusTcpSimulator.Core/ModbusTcpSimulator.Core.csproj" />
+</Solution>

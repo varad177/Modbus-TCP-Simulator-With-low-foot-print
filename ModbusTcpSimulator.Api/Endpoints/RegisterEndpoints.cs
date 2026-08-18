@@ -47,6 +47,15 @@ public static class RegisterEndpoints
             if (req.UpdateIntervalMs < 50)
                 return Results.BadRequest(new { error = "UpdateIntervalMs must be >= 50" });
 
+            // Check for overlapping address ranges on the same unit + register type
+            var existingRegs = await repo.GetByUnitIdAsync(unitId);
+            var overlap = existingRegs.FirstOrDefault(r =>
+                r.RegisterType == registerType &&
+                r.StartAddress <= req.EndAddress &&
+                r.EndAddress >= req.StartAddress);
+            if (overlap != null)
+                return Results.BadRequest(new { error = $"Address range {req.StartAddress}-{req.EndAddress} overlaps with existing register {overlap.StartAddress}-{overlap.EndAddress} (id={overlap.Id})" });
+
             // Auto-clamp InitialValue instead of rejecting
             var initialValue = req.InitialValue;
             if (initialValue < minValue) initialValue = minValue;
@@ -107,6 +116,16 @@ public static class RegisterEndpoints
             var initialValue = req.InitialValue;
             if (initialValue < minValue) initialValue = minValue;
             if (initialValue > maxValue) initialValue = maxValue;
+
+            // Check for overlapping address ranges on the same unit + register type (excluding self)
+            var existingRegs = await repo.GetByUnitIdAsync(existing.SimulatedUnitId);
+            var overlap = existingRegs.FirstOrDefault(r =>
+                r.Id != id &&
+                r.RegisterType == registerType &&
+                r.StartAddress <= req.EndAddress &&
+                r.EndAddress >= req.StartAddress);
+            if (overlap != null)
+                return Results.BadRequest(new { error = $"Address range {req.StartAddress}-{req.EndAddress} overlaps with existing register {overlap.StartAddress}-{overlap.EndAddress} (id={overlap.Id})" });
 
             if (req.SimulatedUnitId != 0) existing.SimulatedUnitId = req.SimulatedUnitId;
             existing.RegisterType = registerType;

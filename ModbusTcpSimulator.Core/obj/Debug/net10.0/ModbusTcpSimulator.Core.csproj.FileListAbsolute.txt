@@ -10,3 +10,4 @@ C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Core\obj\Debug\
 C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Core\obj\Debug\net10.0\refint\ModbusTcpSimulator.Core.dll
 C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Core\obj\Debug\net10.0\ModbusTcpSimulator.Core.pdb
 C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Core\obj\Debug\net10.0\ref\ModbusTcpSimulator.Core.dll
+C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Core\obj\Debug\net10.0\ModbusTcpSimulator.Core.sourcelink.json

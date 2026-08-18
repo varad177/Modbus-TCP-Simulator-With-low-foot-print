@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ModbusTcpSimulator.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+cd925ad5791070b323d962292d95dccabcc15a7b")]
 [assembly: System.Reflection.AssemblyProductAttribute("ModbusTcpSimulator.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ModbusTcpSimulator.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

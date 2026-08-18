@@ -7,7 +7,7 @@
   <meta name="description" content="Production-quality Modbus TCP simulator with live WebSocket register monitoring, anomaly injection, and multi-unit support.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="app.css?v=1.0.11">
+  <link rel="stylesheet" href="app.css?v=1.0.13">
 </head>
 <body>
 
@@ -15,6 +15,7 @@
 
   <!-- ── Top Bar ───────────────────────────────────────────── -->
   <header class="top-bar">
+    <button class="hamburger" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
     <a class="top-bar__logo" href="#">
       <div class="top-bar__logo-icon">M</div>
       Modbus TCP Simulator
@@ -31,6 +32,7 @@
     </div>
 
     <div id="sim-status-badge" class="status-badge stopped">● Stopped</div>
+    <button class="btn btn-ghost btn-icon" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
     <div class="top-bar__ws-indicator" id="ws-indicator">
       <div class="ws-dot" id="ws-dot"></div>
       <span id="ws-label">WebSocket</span>
@@ -151,7 +153,6 @@
           <button class="btn btn-ghost" onclick="openAddRegister()">+ Add Register</button>
           <span class="badge badge-cyan" id="live-register-count">0 registers</span>
           <button class="btn btn-amber btn-sm" onclick="clearLiveTable()" title="Clears the live values display only — does NOT delete registers or stop the simulator">Clear</button>
-          <span class="text-xs text-muted" style="margin-left:2px;white-space:nowrap">Display only</span>
           <div class="action-divider"></div>
           <button class="btn btn-ghost btn-sm" onclick="exportConfig()" title="Export all units, registers, and anomalies to a JSON file">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -175,6 +176,7 @@
         <div class="card-header">
           <h2>Register Values</h2>
           <div class="flex items-center gap-2">
+            <input type="text" id="live-search" class="search-input" placeholder="Search unit, type, address…" oninput="filterLiveTable()">
             <div class="ws-dot" id="live-ws-dot" style="width:8px;height:8px"></div>
             <span class="text-sm text-muted" id="live-ws-label">Connecting…</span>
           </div>
@@ -228,7 +230,10 @@
       <div class="card">
         <div class="card-header">
           <h2>All Anomalies</h2>
-          <span class="badge badge-cyan" id="anomalies-count-badge">0</span>
+          <div class="flex items-center gap-2">
+            <input type="text" id="anomaly-search" class="search-input" placeholder="Search name, unit, type…" oninput="filterAnomalies()">
+            <span class="badge badge-cyan" id="anomalies-count-badge">0</span>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
@@ -356,6 +361,11 @@
         <div class="form-group" id="reg-max-group">
           <label>Max Value</label>
           <input type="number" id="reg-max-input" value="100" step="any">
+        </div>
+        <div class="form-group" id="reg-initial-group">
+          <label>Initial Value</label>
+          <input type="number" id="reg-initial-input" value="0" step="any">
+          <span class="form-hint">Starting value (clamped to Min/Max)</span>
         </div>
         <div class="form-group" id="reg-constant-group" style="display:none">
           <label>Constant Value</label>
@@ -588,6 +598,6 @@
   </div>
 </div>
 
-<script src="app.js?v=1.0.9"></script>
+<script src="app.js?v=1.0.13"></script>
 </body>
 </html>

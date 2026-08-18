@@ -117,6 +117,20 @@ public sealed class SimulationWorker : BackgroundService
         var configs = (await _regRepo.GetAllAsync()).ToList();
         var units = (await _unitRepo.GetAllAsync()).ToDictionary(u => u.Id, u => u.UnitId);
 
+        // Auto-deduplicate: if multiple configs cover overlapping addresses on same unit+type,
+        // keep only the latest (highest Id) and delete the rest
+        var toDelete = DeduplicateConfigs(configs);
+        if (toDelete.Count > 0)
+        {
+            foreach (var id in toDelete)
+                await _regRepo.DeleteAsync(id);
+            _logger.LogWarning("Removed {Count} duplicate register configs", toDelete.Count);
+        }
+
+        // Reload after dedup
+        if (toDelete.Count > 0)
+            configs = (await _regRepo.GetAllAsync()).ToList();
+
         var newEntries = new List<RegisterEntry>();
         foreach (var cfg in configs)
         {
@@ -134,5 +148,39 @@ public sealed class SimulationWorker : BackgroundService
 
         // Atomic swap
         _entries = newEntries;
+    }
+
+    /// <summary>
+    /// Finds register configs with overlapping address ranges on the same unit + register type.
+    /// Returns the Ids of the older duplicates to delete (keeps the highest Id per overlapping group).
+    /// </summary>
+    private static List<int> DeduplicateConfigs(List<RegisterConfiguration> configs)
+    {
+        var toDelete = new List<int>();
+
+        // Group by (SimulatedUnitId, RegisterType)
+        var groups = configs
+            .GroupBy(c => new { c.SimulatedUnitId, c.RegisterType })
+            .ToList();
+
+        foreach (var group in groups)
+        {
+            var sorted = group.OrderByDescending(c => c.Id).ToList();
+            var keep = new List<RegisterConfiguration>();
+
+            foreach (var cfg in sorted)
+            {
+                bool overlaps = keep.Any(k =>
+                    k.StartAddress <= cfg.EndAddress &&
+                    k.EndAddress >= cfg.StartAddress);
+
+                if (overlaps)
+                    toDelete.Add(cfg.Id);
+                else
+                    keep.Add(cfg);
+            }
+        }
+
+        return toDelete;
     }
 }

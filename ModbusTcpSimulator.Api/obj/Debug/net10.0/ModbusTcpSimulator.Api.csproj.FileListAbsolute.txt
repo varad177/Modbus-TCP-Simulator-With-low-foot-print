@@ -69,6 +69,7 @@ C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\obj\Debug\n
 C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\obj\Debug\net10.0\ModbusTcpSimulator.Api.genruntimeconfig.cache
 C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\obj\Debug\net10.0\ref\ModbusTcpSimulator.Api.dll
 C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\bin\Debug\net10.0\ModbusTcpSimulator.Api.staticwebassets.runtime.json
-C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\obj\Debug\net10.0\compressed\vh5zfce2bi-{0}-6yan1mlsyq-6yan1mlsyq.gz
-C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\obj\Debug\net10.0\compressed\y3fuc3ua88-{0}-jwqzcawyan-jwqzcawyan.gz
-C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\obj\Debug\net10.0\compressed\2wwats7uxu-{0}-lg7z7oyens-lg7z7oyens.gz
+C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\obj\Debug\net10.0\ModbusTcpSimulator.Api.sourcelink.json
+C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\obj\Debug\net10.0\compressed\vh5zfce2bi-{0}-wxcqgly5l8-wxcqgly5l8.gz
+C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\obj\Debug\net10.0\compressed\2wwats7uxu-{0}-htrxhed6ce-htrxhed6ce.gz
+C:\Users\Varad Dhumale\Desktop\CFDH Simulator\ModbusTcpSimulator.Api\obj\Debug\net10.0\compressed\y3fuc3ua88-{0}-9lg8cqne99-9lg8cqne99.gz

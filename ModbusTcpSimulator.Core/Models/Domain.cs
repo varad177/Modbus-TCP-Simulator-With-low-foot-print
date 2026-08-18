@@ -112,7 +112,15 @@ public class ActiveAnomaly
     public DateTime EndsAt { get; set; }
     public AnomalyConfiguration Config { get; set; } = null!;
     public Dictionary<ushort, double> BaseValues { get; set; } = new();
-    public double MidpointValue { get; set; }  // (MinValue + MaxValue) / 2 from register config
+    public double MidpointValue { get; set; }
     public DataType DataType { get; set; } = DataType.Float32;
     public ByteOrder ByteOrder { get; set; } = ByteOrder.BigEndian;
+
+    // Gradual recovery state — null when not recovering
+    public bool IsRecovering { get; set; }
+    public DateTime RecoveryStartedAt { get; set; }
+    public DateTime RecoveryEndsAt { get; set; }
+    public Dictionary<ushort, double> RecoveryStartValues { get; set; } = new();   // values at the moment recovery began
+    public Dictionary<ushort, double> RecoveryTargetValues { get; set; } = new();  // fresh simulation values to interpolate toward
+    public RegisterConfiguration? RecoveryRegConfig { get; set; }                  // cached to avoid repeated DB lookups
 }

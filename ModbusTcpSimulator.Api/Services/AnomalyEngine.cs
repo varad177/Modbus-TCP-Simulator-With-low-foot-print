@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModbusTcpSimulator.Core.Conversion;
+using ModbusTcpSimulator.Core.Generation;
 using ModbusTcpSimulator.Core.Models;
 using ModbusTcpSimulator.Core.Persistence;
 using ModbusTcpSimulator.Core.State;
@@ -80,23 +81,100 @@ public sealed class AnomalyEngine : BackgroundService
             }
         }
 
-        // 2. Tick active anomalies: apply values, detect expiry
+        // 2. Collect expired anomalies first (don't modify dict during foreach)
+        //    Skip anomalies already in recovery — they're handled in step 3.5
+        var expiredIds = new List<int>();
         foreach (var (id, active) in _activeById)
         {
-            if (now >= active.EndsAt)
-            {
-                // Expired — unlock addresses so simulation resumes
-                var expiredUnit = await _unitRepo.GetByIdAsync(active.Config.SimulatedUnitId);
-                if (expiredUnit != null)
-                    _state.UnlockAnomaly(expiredUnit.UnitId, active.Config.RegisterType,
-                        active.Config.StartAddress, active.Config.EndAddress);
+            if (now >= active.EndsAt && !active.IsRecovering)
+                expiredIds.Add(id);
+        }
 
+        // 3. Process expired anomalies
+        foreach (var id in expiredIds)
+        {
+            if (!_activeById.TryGetValue(id, out var expired)) continue;
+
+            if (expired.Config.RecoveryType == RecoveryType.Gradual && !expired.IsRecovering)
+            {
+                // Begin gradual recovery — keep lock, interpolate back to normal
+                await BeginRecoveryAsync(expired, now);
+                _logger.LogInformation("Anomaly '{Name}' entered gradual recovery", expired.Name);
+            }
+            else
+            {
+                // Immediate (or recovery already complete) — unlock and remove
                 _activeById.TryRemove(id, out _);
-                _logger.LogInformation("Anomaly '{Name}' completed, simulation resumed", active.Name);
+                var unit = await _unitRepo.GetByIdAsync(expired.Config.SimulatedUnitId);
+                if (unit != null)
+                {
+                    _state.UnlockAnomaly(unit.UnitId, expired.Config.RegisterType,
+                        expired.Config.StartAddress, expired.Config.EndAddress);
+                    await WriteFreshValuesAsync(unit.UnitId, expired.Config, expired.DataType, expired.ByteOrder);
+                }
+                _logger.LogInformation("Anomaly '{Name}' completed, simulation resumed", expired.Name);
+            }
+        }
+
+        // 3.5. Process gradual recovery (interpolate back to normal)
+        var recoveryCompleteIds = new List<int>();
+        foreach (var (id, active) in _activeById)
+        {
+            if (!active.IsRecovering) continue;
+
+            if (now >= active.RecoveryEndsAt)
+            {
+                recoveryCompleteIds.Add(id);
                 continue;
             }
 
-            // Apply anomaly values every tick
+            // Interpolate from recovery start values toward target fresh values
+            double totalMs = (active.RecoveryEndsAt - active.RecoveryStartedAt).TotalMilliseconds;
+            double elapsedMs = (now - active.RecoveryStartedAt).TotalMilliseconds;
+            double progress = Math.Clamp(elapsedMs / Math.Max(totalMs, 0.001), 0, 1);
+
+            var unit = await _unitRepo.GetByIdAsync(active.Config.SimulatedUnitId);
+            if (unit is null) continue;
+
+            var regCfg = active.RecoveryRegConfig;
+            if (regCfg is null) continue;
+            int stride = Math.Max(1, DataTypeConverter.RegisterCount(active.DataType));
+
+            for (ushort addr = active.Config.StartAddress; addr <= active.Config.EndAddress; addr = (ushort)(addr + stride))
+            {
+                active.RecoveryStartValues.TryGetValue(addr, out var fromVal);
+                active.RecoveryTargetValues.TryGetValue(addr, out var toVal);
+                double recovered = fromVal + (toVal - fromVal) * progress;
+
+                if (active.DataType is DataType.Int16 or DataType.UInt16 or DataType.Int32
+                    or DataType.UInt32 or DataType.Int64 or DataType.UInt64)
+                    recovered = Math.Round(recovered);
+                else if (active.DataType is DataType.Bool)
+                    recovered = recovered >= 0.5 ? 1.0 : 0.0;
+
+                var encoded = DataTypeConverter.Encode(recovered, active.DataType, active.ByteOrder);
+                _state.ForceSetValue(unit.UnitId, active.Config.RegisterType, addr, encoded, recovered);
+            }
+        }
+
+        // Complete finished recoveries
+        foreach (var id in recoveryCompleteIds)
+        {
+            if (!_activeById.TryRemove(id, out var done)) continue;
+            var unit = await _unitRepo.GetByIdAsync(done.Config.SimulatedUnitId);
+            if (unit != null)
+            {
+                _state.UnlockAnomaly(unit.UnitId, done.Config.RegisterType,
+                    done.Config.StartAddress, done.Config.EndAddress);
+                await WriteFreshValuesAsync(unit.UnitId, done.Config, done.DataType, done.ByteOrder);
+            }
+            _logger.LogInformation("Anomaly '{Name}' gradual recovery complete, simulation resumed", done.Name);
+        }
+
+        // 4. Apply active anomalies (skip recovering ones — handled in 3.5)
+        foreach (var (id, active) in _activeById)
+        {
+            if (active.IsRecovering) continue;
             var unit = await _unitRepo.GetByIdAsync(active.Config.SimulatedUnitId);
             if (unit is null) continue;
             ApplyAnomalyToState(unit.UnitId, active, now);
@@ -190,6 +268,59 @@ public sealed class AnomalyEngine : BackgroundService
         return result;
     }
 
+    /// <summary>Transition an active anomaly into gradual recovery mode.</summary>
+    private async Task BeginRecoveryAsync(ActiveAnomaly active, DateTime now)
+    {
+        var regs = await _regRepo.GetByUnitIdAsync(active.Config.SimulatedUnitId);
+        var regCfg = regs.FirstOrDefault(r =>
+            r.RegisterType == active.Config.RegisterType &&
+            r.StartAddress <= active.Config.StartAddress &&
+            r.EndAddress >= active.Config.EndAddress);
+
+        // Snapshot current values as the interpolation start point
+        var startValues = SnapshotBaseValues(
+            (await _unitRepo.GetByIdAsync(active.Config.SimulatedUnitId))!.UnitId,
+            active.Config, active.DataType, active.ByteOrder);
+
+        // Generate the target fresh values we're interpolating toward
+        var targetValues = new Dictionary<ushort, double>();
+        if (regCfg != null)
+        {
+            var gen = new ValueGenerator(regCfg);
+            int stride = Math.Max(1, DataTypeConverter.RegisterCount(active.DataType));
+            for (ushort addr = active.Config.StartAddress; addr <= active.Config.EndAddress; addr = (ushort)(addr + stride))
+                targetValues[addr] = gen.Next();
+        }
+
+        active.IsRecovering = true;
+        active.RecoveryStartedAt = now;
+        active.RecoveryEndsAt = now.AddSeconds(active.Config.DurationSeconds);
+        active.RecoveryStartValues = startValues;
+        active.RecoveryTargetValues = targetValues;
+        active.RecoveryRegConfig = regCfg;
+    }
+
+    /// <summary>Write fresh simulation values to the given address range.</summary>
+    private async Task WriteFreshValuesAsync(byte unitId, AnomalyConfiguration config,
+        DataType dataType, ByteOrder byteOrder)
+    {
+        var regs = await _regRepo.GetByUnitIdAsync(config.SimulatedUnitId);
+        var regCfg = regs.FirstOrDefault(r =>
+            r.RegisterType == config.RegisterType &&
+            r.StartAddress <= config.StartAddress &&
+            r.EndAddress >= config.EndAddress);
+        if (regCfg == null) return;
+
+        var gen = new ValueGenerator(regCfg);
+        int stride = Math.Max(1, DataTypeConverter.RegisterCount(dataType));
+        for (ushort addr = config.StartAddress; addr <= config.EndAddress; addr = (ushort)(addr + stride))
+        {
+            var freshValue = gen.Next();
+            var encoded = DataTypeConverter.Encode(freshValue, dataType, byteOrder);
+            _state.ForceSetValue(unitId, config.RegisterType, addr, encoded, freshValue);
+        }
+    }
+
     private void ApplyAnomalyToState(byte unitId, ActiveAnomaly active, DateTime now)
     {
         var cfg = active.Config;
@@ -263,28 +394,45 @@ public sealed class AnomalyEngine : BackgroundService
     /// <summary>Stop an active anomaly manually.</summary>
     public async Task<bool> StopManualAsync(int anomalyId)
     {
-        if (_activeById.TryRemove(anomalyId, out var stopped))
+        if (!_activeById.TryGetValue(anomalyId, out var stopped))
+            return false;
+
+        if (stopped.IsRecovering)
         {
-            var unit = await _unitRepo.GetByIdAsync(stopped.Config.SimulatedUnitId);
-            if (unit != null)
-            {
-                // Only unlock if no other active anomaly still covers these addresses
-                bool stillCovered = _activeById.Values.Any(other =>
-                    other.Config.SimulatedUnitId == stopped.Config.SimulatedUnitId &&
-                    other.Config.RegisterType == stopped.Config.RegisterType &&
-                    other.Config.StartAddress <= stopped.Config.EndAddress &&
-                    other.Config.EndAddress >= stopped.Config.StartAddress);
-
-                if (!stillCovered)
-                {
-                    _state.UnlockAnomaly(unit.UnitId, stopped.Config.RegisterType,
-                        stopped.Config.StartAddress, stopped.Config.EndAddress);
-                }
-            }
-
-            _logger.LogInformation("Anomaly '{Name}' stopped manually by user request", stopped.Name);
+            // Already recovering — let it finish naturally
             return true;
         }
-        return false;
+
+        if (stopped.Config.RecoveryType == RecoveryType.Gradual)
+        {
+            // Begin gradual recovery instead of instant snap
+            await BeginRecoveryAsync(stopped, DateTime.UtcNow);
+            _logger.LogInformation("Anomaly '{Name}' stopped manually — entering gradual recovery", stopped.Name);
+            return true;
+        }
+
+        // Immediate recovery — remove and write fresh values now
+        _activeById.TryRemove(anomalyId, out _);
+
+        var unit = await _unitRepo.GetByIdAsync(stopped.Config.SimulatedUnitId);
+        if (unit != null)
+        {
+            // Only unlock if no other active anomaly still covers these addresses
+            bool stillCovered = _activeById.Values.Any(other =>
+                other.Config.SimulatedUnitId == stopped.Config.SimulatedUnitId &&
+                other.Config.RegisterType == stopped.Config.RegisterType &&
+                other.Config.StartAddress <= stopped.Config.EndAddress &&
+                other.Config.EndAddress >= stopped.Config.StartAddress);
+
+            if (!stillCovered)
+            {
+                _state.UnlockAnomaly(unit.UnitId, stopped.Config.RegisterType,
+                    stopped.Config.StartAddress, stopped.Config.EndAddress);
+                await WriteFreshValuesAsync(unit.UnitId, stopped.Config, stopped.DataType, stopped.ByteOrder);
+            }
+        }
+
+        _logger.LogInformation("Anomaly '{Name}' stopped manually by user request", stopped.Name);
+        return true;
     }
 }

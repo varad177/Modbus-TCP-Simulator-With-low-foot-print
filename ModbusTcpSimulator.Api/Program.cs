@@ -108,6 +108,9 @@ try
     app.MapSimulatorEndpoints();
     app.MapExportImportEndpoints();
 
+    // ── Health Check ─────────────────────────────────────────────────────────
+    app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
+
     // ── SPA Fallback ──────────────────────────────────────────────────────────────
     app.MapFallbackToFile("index.html");
 

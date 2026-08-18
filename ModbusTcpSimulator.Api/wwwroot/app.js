@@ -26,6 +26,7 @@ let units = [];
 let allRegisters = [];
 let anomalies = [];
 let serverStatus = {};
+const collapsedUnits = new Set();
 
 // ────────────────────────────────────────────────────────────
 // Navigation
@@ -39,9 +40,27 @@ function navigate(btn) {
 
   // Refresh data for the selected screen
   if (btn.dataset.screen === 'dashboard') refreshDashboard();
-  if (btn.dataset.screen === 'livevalues') { /* WebSocket handles this */ }
+  if (btn.dataset.screen === 'livevalues') { loadAnomalies().then(() => updateAnomalyCellsInPlace()); }
   if (btn.dataset.screen === 'anomalies') loadAnomalies();
 }
+
+// ────────────────────────────────────────────────────────────
+// Theme
+// ────────────────────────────────────────────────────────────
+function toggleTheme() {
+  document.documentElement.classList.toggle('dark');
+  const isDark = document.documentElement.classList.contains('dark');
+  localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  document.getElementById('theme-toggle').textContent = isDark ? '☀️' : '🌙';
+}
+(function initTheme() {
+  const saved = localStorage.getItem('theme');
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (saved === 'dark' || (!saved && prefersDark)) {
+    document.documentElement.classList.add('dark');
+    setTimeout(() => { document.getElementById('theme-toggle').textContent = '☀️'; }, 0);
+  }
+})();
 
 // ────────────────────────────────────────────────────────────
 // Modals
@@ -55,6 +74,12 @@ function closeModal(id) {
 // Close on backdrop click
 document.querySelectorAll('.modal-backdrop').forEach(m => {
   m.addEventListener('click', e => { if (e.target === m) closeModal(m.id); });
+});
+// Close on Escape key
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal-backdrop.open').forEach(m => closeModal(m.id));
+  }
 });
 
 // ────────────────────────────────────────────────────────────
@@ -87,10 +112,18 @@ function toast(message, type = 'info') {
   const c = document.getElementById('toast-container');
   const t = document.createElement('div');
   t.className = `toast ${type}`;
-  const icons = { success: '✓', error: '✕', info: 'ℹ' };
+  const icons = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
   t.innerHTML = `<span>${icons[type] || 'ℹ'}</span><span>${message}</span>`;
+  if (type === 'error') {
+    const btn = document.createElement('button');
+    btn.textContent = '✕';
+    btn.className = 'toast-close';
+    btn.onclick = () => t.remove();
+    t.appendChild(btn);
+  } else {
+    setTimeout(() => t.remove(), 3500);
+  }
   c.appendChild(t);
-  setTimeout(() => t.remove(), 3500);
 }
 
 // ────────────────────────────────────────────────────────────
@@ -314,7 +347,21 @@ function updateLiveCell(key, entry) {
 }
 
 // ── Unit group expand/collapse ──
-function toggleUnitGroup() {}
+function toggleUnitGroup(unitId) {
+  if (collapsedUnits.has(unitId)) {
+    collapsedUnits.delete(unitId);
+  } else {
+    collapsedUnits.add(unitId);
+  }
+  // Toggle visibility of rows belonging to this unit
+  document.querySelectorAll(`#live-tbody tr[data-unit="${unitId}"]`).forEach((tr, i) => {
+    if (i === 0) return; // skip the header row itself
+    tr.style.display = collapsedUnits.has(unitId) ? 'none' : '';
+  });
+  // Toggle header visual state
+  const header = document.querySelector(`#live-tbody tr.unit-group-header[data-unit="${unitId}"]`);
+  if (header) header.classList.toggle('collapsed', collapsedUnits.has(unitId));
+}
 
 // ── Lightweight: update only anomaly control cells in-place ──
 function updateAnomalyCellsInPlace() {
@@ -375,13 +422,14 @@ function renderLiveTable() {
     const unitDb = units.find(u => u.unitId === unitId);
 
     html += `
-      <tr class="unit-group-header" data-unit="${unitId}">
+      <tr class="unit-group-header${collapsedUnits.has(unitId) ? ' collapsed' : ''}" data-unit="${unitId}" onclick="toggleUnitGroup(${unitId})" style="cursor:pointer">
         <td colspan="8">
           <div class="unit-group-toggle">
+            <span class="unit-group-chevron">${collapsedUnits.has(unitId) ? '▶' : '▼'}</span>
             <span class="badge badge-cyan">Unit ${unitId}</span>
             ${unit?.label ? `<span class="unit-group-label">${unit.label}</span>` : ''}
             <span class="text-muted text-sm">${regs.length} registers</span>
-            <span style="margin-left:auto;display:flex;gap:4px;">
+            <span style="margin-left:auto;display:flex;gap:4px;" onclick="event.stopPropagation()">
               <button class="btn btn-ghost btn-xs" onclick="editUnit(${unitDb?.id || 0})" title="Edit unit">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                 Edit
@@ -474,6 +522,25 @@ function formatLiveValue(entry) {
   return Math.round(val).toString();
 }
 
+// ── Search / Filter ──────────────────────────────────────────
+function filterLiveTable() {
+  const q = (document.getElementById('live-search')?.value || '').toLowerCase();
+  document.querySelectorAll('#live-tbody tr').forEach(tr => {
+    if (!q) { tr.style.display = ''; return; }
+    const text = tr.textContent.toLowerCase();
+    tr.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+
+function filterAnomalies() {
+  const q = (document.getElementById('anomaly-search')?.value || '').toLowerCase();
+  document.querySelectorAll('#anomalies-tbody tr').forEach(tr => {
+    if (!q) { tr.style.display = ''; return; }
+    const text = tr.textContent.toLowerCase();
+    tr.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+
 function clearLiveTable() {
   liveRegisters.clear();
   document.getElementById('live-tbody').innerHTML = '';
@@ -521,11 +588,7 @@ async function startSimulator() {
 }
 
 async function stopSimulator() {
-  try {
-    await api('POST', '/api/simulator/stop');
-    toast('Simulator stopped', 'info');
-    refreshDashboard();
-  } catch (e) { toast(e.message, 'error'); }
+  toast('Simulator runs as a background service — restart the application to stop it', 'warning');
 }
 
 // ────────────────────────────────────────────────────────────
@@ -595,6 +658,8 @@ async function saveUnit() {
     toast('Unit ID must be 1–247', 'error'); return;
   }
 
+  const btn = document.querySelector('#modal-unit .btn-primary');
+  if (btn) { btn.disabled = true; btn.dataset.origText = btn.textContent; btn.textContent = 'Saving…'; }
   try {
     if (editId) {
       await api('PUT', `/api/units/${editId}`, { label, enabled });
@@ -607,6 +672,7 @@ async function saveUnit() {
     await loadUnits();
     await loadAllRegisters();
   } catch (e) { toast(e.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = btn.dataset.origText || 'Save'; } }
 }
 
 async function deleteUnit(id) {
@@ -616,6 +682,7 @@ async function deleteUnit(id) {
     toast('Unit deleted', 'info');
     await loadUnits();
     await loadAllRegisters();
+    await loadAnomalies();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -819,6 +886,7 @@ async function editRegister(id, address) {
   document.getElementById('reg-interval-input').value = reg.updateIntervalMs;
   document.getElementById('reg-min-input').value = reg.minValue;
   document.getElementById('reg-max-input').value = reg.maxValue;
+  if (document.getElementById('reg-initial-input')) document.getElementById('reg-initial-input').value = reg.initialValue ?? 0;
   if (document.getElementById('reg-constant-input')) document.getElementById('reg-constant-input').value = reg.constantValue;
   if (document.getElementById('reg-step-input')) document.getElementById('reg-step-input').value = reg.incrementStep;
   if (document.getElementById('reg-period-input')) document.getElementById('reg-period-input').value = reg.sinePeriodSeconds;
@@ -846,7 +914,7 @@ async function saveRegister() {
     updateIntervalMs: parseInt(document.getElementById('reg-interval-input').value),
     minValue: parseFloat(document.getElementById('reg-min-input').value) || 0,
     maxValue: parseFloat(document.getElementById('reg-max-input').value) || 100,
-    initialValue: 0,
+    initialValue: parseFloat(document.getElementById('reg-initial-input')?.value) || 0,
     constantValue: parseFloat(document.getElementById('reg-constant-input')?.value) || 0,
     incrementStep: parseFloat(document.getElementById('reg-step-input')?.value) || 1,
     sinePeriodSeconds: parseFloat(document.getElementById('reg-period-input')?.value) || 60,
@@ -859,6 +927,8 @@ async function saveRegister() {
     toast('Start address must be ≤ End address', 'error'); return;
   }
 
+  const btn = document.querySelector('#modal-register .btn-primary');
+  if (btn) { btn.disabled = true; btn.dataset.origText = btn.textContent; btn.textContent = 'Saving…'; }
   try {
     if (editId) {
       await api('PUT', `/api/register-configurations/${editId}`, body);
@@ -871,6 +941,7 @@ async function saveRegister() {
     document.getElementById('reg-edit-id').value = '';
     await loadAllRegisters();
   } catch (e) { toast(e.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = btn.dataset.origText || 'Save'; } }
 }
 
 async function deleteRegister(id, address) {
@@ -920,14 +991,16 @@ function renderAnomalies() {
   const active = anomalies.filter(a => a.isActive);
   const activeBody = document.getElementById('active-anomalies-tbody');
   activeBody.innerHTML = active.length
-    ? active.map(a => `
+    ? active.map(a => {
+        const remaining = Math.max(0, Math.ceil((new Date(a.endsAt).getTime() - Date.now()) / 1000));
+        return `
         <tr class="anomaly-row">
           <td><strong>${a.name}</strong></td>
           <td><span class="badge badge-cyan">Unit ${getUnitById(a.simulatedUnitId)?.unitId || '?'}</span></td>
           <td class="mono">${formatRegType(a.registerType)} ${formatAddressShort(a.registerType, a.startAddress, a.endAddress)}</td>
-          <td><span class="countdown">${a.durationSeconds}s</span></td>
+          <td><span class="countdown" data-end="${a.endsAt}">${remaining}s</span></td>
         </tr>
-      `).join('')
+      `}).join('')
     : '<tr><td colspan="4" class="empty-state text-muted" style="padding:12px">No anomalies active</td></tr>';
 
   const tbody = document.getElementById('anomalies-tbody');
@@ -937,6 +1010,9 @@ function renderAnomalies() {
   }
   tbody.innerHTML = anomalies.map(a => {
     const u = getUnitById(a.simulatedUnitId);
+    const nextSched = a.nextScheduled
+      ? `<span class="text-xs text-muted" style="display:block;margin-top:2px">Next: ${new Date(a.nextScheduled).toLocaleTimeString()}</span>`
+      : '';
     return `
       <tr${a.isActive ? ' class="anomaly-row"' : ''}>
         <td><strong>${a.name}</strong></td>
@@ -947,7 +1023,10 @@ function renderAnomalies() {
         <td><span class="badge ${dirBadge(a.direction)}">${formatDirection(a)}</span></td>
         <td><span class="badge badge-gray">${a.pattern}</span></td>
         <td class="mono">${a.durationSeconds}s</td>
-        <td><span class="badge ${a.triggerMode === 'Scheduled' ? 'badge-purple' : 'badge-blue'}">${a.triggerMode}</span></td>
+        <td>
+          <span class="badge ${a.triggerMode === 'Scheduled' ? 'badge-purple' : 'badge-blue'}">${a.triggerMode}</span>
+          ${nextSched}
+        </td>
         <td>${a.enabled
           ? '<span class="badge badge-emerald">On</span>'
           : '<span class="badge badge-gray">Off</span>'
@@ -975,11 +1054,25 @@ function formatDirection(a) {
   return `Custom`;
 }
 
+// ── Schedule a UI refresh exactly when an anomaly expires ──
+function scheduleAnomalyExpiryRefresh(anomalyId) {
+  const a = anomalies.find(x => x.id === anomalyId);
+  if (!a || !a.durationSeconds) return;
+  // Gradual recovery adds another DurationSeconds after the anomaly ends
+  const multiplier = a.recoveryType === 'Gradual' ? 2 : 1;
+  const ms = a.durationSeconds * multiplier * 1000 + 500;
+  setTimeout(async () => {
+    await loadAnomalies();
+    scheduleRenderLiveTable();
+  }, ms);
+}
+
 async function triggerAnomaly(id) {
   try {
     await api('POST', `/api/anomalies/${id}/trigger`);
     toast('Anomaly triggered!', 'success');
-    setTimeout(loadAnomalies, 500);
+    await loadAnomalies();
+    scheduleAnomalyExpiryRefresh(id);
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -1310,6 +1403,8 @@ async function saveAnomaly() {
   if (!body.name) { toast('Name is required', 'error'); return; }
   if (!body.simulatedUnitId) { toast('Select a unit', 'error'); return; }
 
+  const btn = document.querySelector('#modal-anomaly .btn-primary');
+  if (btn) { btn.disabled = true; btn.dataset.origText = btn.textContent; btn.textContent = 'Saving…'; }
   try {
     let savedAnomalyId = editId;
     if (editId) {
@@ -1326,10 +1421,12 @@ async function saveAnomaly() {
     if (autoTriggerOnSave && savedAnomalyId) {
       await api('POST', `/api/anomalies/${savedAnomalyId}/trigger`);
       toast('Anomaly injected & triggered!', 'success');
+      scheduleAnomalyExpiryRefresh(savedAnomalyId);
     }
 
-    loadAnomalies();
+    await loadAnomalies();
   } catch (e) { toast(e.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = btn.dataset.origText || 'Save'; } }
 }
 
 async function deleteAnomaly(id) {
@@ -1337,7 +1434,7 @@ async function deleteAnomaly(id) {
   try {
     await api('DELETE', `/api/anomalies/${id}`);
     toast('Anomaly deleted', 'info');
-    loadAnomalies();
+    await loadAnomalies();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -1518,6 +1615,7 @@ async function triggerAnomalyInline(id, event) {
     toast('Anomaly triggered!', 'success');
     await loadAnomalies();
     loadSimulatorView();
+    scheduleAnomalyExpiryRefresh(id);
   } catch (e) {
     toast('Trigger failed: ' + e.message, 'error');
   }
@@ -1528,9 +1626,12 @@ async function stopAnomalyInline(id, event) {
   try {
     await api('POST', `/api/anomalies/${id}/stop`);
     toast('Anomaly stopped!', 'info');
+  } catch (e) {
+    toast('Anomaly already expired — refreshed', 'info');
+  } finally {
     await loadAnomalies();
     loadSimulatorView();
-  } catch (e) { toast(e.message, 'error'); }
+  }
 }
 
 async function toggleScheduleInline(id, enable, event) {
@@ -1696,7 +1797,22 @@ async function importConfig(input) {
 // ────────────────────────────────────────────────────────────
 setInterval(() => {
   loadAnomalies().catch(() => {});
-}, 1500);
+}, 5000);
+
+// ── Live countdown updater (every 1s) ──────────────────────
+setInterval(() => {
+  let anyExpired = false;
+  document.querySelectorAll('.countdown[data-end]').forEach(el => {
+    const end = new Date(el.dataset.end).getTime();
+    const remaining = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+    el.textContent = remaining + 's';
+    if (remaining <= 0 && !el.classList.contains('expired')) {
+      el.classList.add('expired');
+      anyExpired = true;
+    }
+  });
+  if (anyExpired) loadAnomalies();
+}, 1000);
 
 // ────────────────────────────────────────────────────────────
 // Init

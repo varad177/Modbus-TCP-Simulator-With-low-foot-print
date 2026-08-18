@@ -39,22 +39,6 @@ docker compose up -d
 - **Web UI:** http://localhost:8090/index.html
 - **Modbus TCP:** YourLocalIp:502
 
-### Option 2: Run from Source
-
-**Prerequisites:** [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-
-```bash
-git clone https://github.com/varad177/Modbus-TCP-Simulator-With-low-foot-print.git
-cd Modbus-TCP-Simulator-With-low-foot-print
-dotnet run --project ModbusTcpSimulator.Api
-```
-
-- **Web UI:** http://localhost:5175
-- **Modbus TCP:** localhost:502 (port 502 requires admin/root on Windows)
-
-> **Windows (non-admin):** Change the Modbus port in `appsettings.json` to `5020` or any port above 1024.
-
----
 
 ## How It Works
 

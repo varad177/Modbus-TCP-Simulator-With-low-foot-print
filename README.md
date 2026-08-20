@@ -364,6 +364,16 @@ ModbusTcpSimulator.slnx
 
 ---
 
+some images
+<img width="1907" height="867" alt="image" src="https://github.com/user-attachments/assets/285d22ab-eeaf-4915-b9e5-948b8e922ed4" />
+
+<img width="1919" height="869" alt="image" src="https://github.com/user-attachments/assets/9ca3ca02-4de2-43a2-9793-563617ddc08d" />
+
+<img width="1919" height="776" alt="image" src="https://github.com/user-attachments/assets/0fdef35a-0a6f-46a5-822d-504c04e55426" />
+
+
+
+
 ## License
 
 MIT

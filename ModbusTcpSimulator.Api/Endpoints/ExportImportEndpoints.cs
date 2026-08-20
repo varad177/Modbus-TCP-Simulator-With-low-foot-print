@@ -160,6 +160,7 @@ public static class ExportImportEndpoints
                     StartAddress = anomaly.StartAddress,
                     EndAddress = anomaly.EndAddress,
                     Direction = anomaly.Direction,
+                    ReferenceBase = anomaly.ReferenceBase,
                     Amount = anomaly.Amount,
                     CustomPerRegister = anomaly.CustomPerRegister,
                     CustomMin = anomaly.CustomMin,

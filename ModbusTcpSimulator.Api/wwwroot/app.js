@@ -27,6 +27,13 @@ let allRegisters = [];
 let anomalies = [];
 let serverStatus = {};
 const collapsedUnits = new Set();
+const registerConfigLookup = new Map(); // "unitId:type:address" → register config
+
+// Pagination
+let allSortedKeys = [];           // sorted register keys (rebuilt on config change)
+let filteredKeys = null;          // filtered subset when searching (null = no filter)
+let currentPage = 0;              // 0-indexed
+const PAGE_SIZE = 100;
 
 // ────────────────────────────────────────────────────────────
 // Navigation
@@ -279,6 +286,7 @@ function processWsUpdate(updates) {
   }
 
   if (newKeysFound) {
+    buildSortedKeys();
     scheduleRenderLiveTable();
   }
 
@@ -287,15 +295,20 @@ function processWsUpdate(updates) {
 }
 
 function findRegisterConfig(unitId, registerType, address) {
-  // Find unit by unitId (Modbus ID)
-  const unit = units.find(u => u.unitId === unitId);
-  if (!unit) return null;
-  return allRegisters.find(r =>
-    r.simulatedUnitId === unit.id &&
-    r.registerType === registerType &&
-    address >= r.startAddress &&
-    address <= r.endAddress
-  );
+  return registerConfigLookup.get(`${unitId}:${registerType}:${address}`) || null;
+}
+
+function buildRegisterConfigLookup() {
+  registerConfigLookup.clear();
+  const strideByType = { UInt16: 1, Int16: 1, Bool: 1, UInt32: 2, Int32: 2, Float32: 2, UInt64: 4, Int64: 4, Float64: 4 };
+  for (const r of allRegisters) {
+    const u = units.find(unit => unit.id == r.simulatedUnitId);
+    if (!u) continue;
+    const stride = strideByType[r.dataType] || 1;
+    for (let addr = r.startAddress; addr <= r.endAddress; addr += stride) {
+      registerConfigLookup.set(`${u.unitId}:${r.registerType}:${addr}`, r);
+    }
+  }
 }
 
 // Split a range register config into individual single-address configs.
@@ -382,6 +395,59 @@ function updateAnomalyCellsInPlace() {
   });
 }
 
+// ── Pagination helpers ──
+function buildSortedKeys() {
+  allSortedKeys = [];
+  liveRegisters.forEach((entry, key) => {
+    allSortedKeys.push({ key, unitId: entry.unitId, registerType: entry.registerType, address: entry.address });
+  });
+  allSortedKeys.sort((a, b) => {
+    if (a.unitId !== b.unitId) return a.unitId - b.unitId;
+    if (a.registerType !== b.registerType) return a.registerType.localeCompare(b.registerType);
+    return a.address - b.address;
+  });
+}
+
+function getPageRegisters() {
+  const source = filteredKeys || allSortedKeys;
+  const start = currentPage * PAGE_SIZE;
+  const slice = source.slice(start, start + PAGE_SIZE);
+  const grouped = {};
+  for (const item of slice) {
+    if (!grouped[item.unitId]) grouped[item.unitId] = [];
+    grouped[item.unitId].push(item);
+  }
+  return grouped;
+}
+
+function goToPage(n) {
+  const source = filteredKeys || allSortedKeys;
+  const totalPages = Math.ceil(source.length / PAGE_SIZE);
+  currentPage = Math.max(0, Math.min(n, totalPages - 1));
+  renderLiveTable();
+}
+
+function renderPagination(totalCount) {
+  const el = document.getElementById('live-pagination');
+  if (!el) return;
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+
+  const start = currentPage * PAGE_SIZE + 1;
+  const end = Math.min((currentPage + 1) * PAGE_SIZE, totalCount);
+
+  el.innerHTML = `
+    <div class="pagination-row">
+      <button class="btn btn-ghost btn-xs" onclick="goToPage(0)" ${currentPage === 0 ? 'disabled' : ''}>&laquo;</button>
+      <button class="btn btn-ghost btn-xs" onclick="goToPage(${currentPage - 1})" ${currentPage === 0 ? 'disabled' : ''}>&lsaquo; Prev</button>
+      <span class="pagination-info">Showing ${start}–${end} of ${totalCount}</span>
+      <button class="btn btn-ghost btn-xs" onclick="goToPage(${currentPage + 1})" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>Next &rsaquo;</button>
+      <button class="btn btn-ghost btn-xs" onclick="goToPage(${totalPages - 1})" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>&raquo;</button>
+      <span class="text-muted text-sm" style="margin-left:8px">Page ${currentPage + 1} / ${totalPages}</span>
+    </div>
+  `;
+}
+
 // ── Full table render (called on new keys / structural changes) ──
 let renderTableTimer = null;
 function scheduleRenderLiveTable() {
@@ -397,31 +463,29 @@ function renderLiveTable() {
   const tbody = document.getElementById('live-tbody');
   let html = '';
 
-  // Group by unit from WS data
-  const grouped = {};
-  liveRegisters.forEach((entry, key) => {
-    const uid = entry.unitId;
-    if (!grouped[uid]) grouped[uid] = [];
-    grouped[uid].push({ key, ...entry });
-  });
+  if (allSortedKeys.length === 0 && liveRegisters.size > 0) buildSortedKeys();
 
-  // Also include units with no live data yet
+  const grouped = getPageRegisters();
+
   units.forEach(u => {
-    if (!grouped[u.unitId]) grouped[u.unitId] = [];
+    if (!grouped[u.unitId]) {
+      if (filteredKeys) {
+        const q = (document.getElementById('live-search')?.value || '').toLowerCase().trim();
+        const matches = String(u.unitId).includes(q) || (u.label || '').toLowerCase().includes(q);
+        if (matches) grouped[u.unitId] = [];
+      } else {
+        grouped[u.unitId] = [];
+      }
+    }
   });
 
+  const source = filteredKeys || allSortedKeys;
+  const totalCount = source.length;
   const sortedUnitIds = Object.keys(grouped).map(Number).sort((a, b) => a - b);
 
   for (const unitId of sortedUnitIds) {
     const regs = grouped[unitId];
     const unit = units.find(u => u.unitId === unitId);
-
-    regs.sort((a, b) => {
-      if (a.registerType !== b.registerType) return a.registerType.localeCompare(b.registerType);
-      return a.address - b.address;
-    });
-
-    const unitDb = units.find(u => u.unitId === unitId);
 
     html += `
       <tr class="unit-group-header${collapsedUnits.has(unitId) ? ' collapsed' : ''}" data-unit="${unitId}" onclick="toggleUnitGroup(${unitId})" style="cursor:pointer">
@@ -430,23 +494,16 @@ function renderLiveTable() {
             <span class="unit-group-chevron">${collapsedUnits.has(unitId) ? '▶' : '▼'}</span>
             <span class="badge badge-cyan">Unit ${unitId}</span>
             ${unit?.label ? `<span class="unit-group-label">${unit.label}</span>` : ''}
-            <span class="text-muted text-sm">${regs.length} registers</span>
-            <span style="margin-left:auto;display:flex;gap:4px;" onclick="event.stopPropagation()">
-              <button class="btn btn-ghost btn-xs" onclick="editUnit(${unitDb?.id || 0})" title="Edit unit">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                Edit
-              </button>
-              <button class="btn btn-danger btn-xs" onclick="deleteUnit(${unitDb?.id || 0})" title="Delete unit">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                Del
-              </button>
-            </span>
+            <span class="text-muted text-sm">${regs.length === 0 ? 'No registers configured' : regs.length + ' registers on this page'}</span>
           </div>
         </td>
       </tr>
     `;
 
-    for (const { key, ...entry } of regs) {
+    for (const item of regs) {
+      const entry = liveRegisters.get(item.key);
+      if (!entry) continue;
+      const key = item.key;
       const valueStr = formatLiveValue(entry);
       const stateEl = entry.isAnomaly
         ? '<span class="state-anomaly">Anomaly</span>'
@@ -486,7 +543,7 @@ function renderLiveTable() {
                 Inject
               </button>
               ${editDelHtml}
-              <button class="btn btn-ghost btn-xs" onclick="copyMbpollCommand(${entry.unitId}, '${entry.registerType}', ${entry.address}, ${entry.address}, '${entry.dataType || 'UInt16'}')" title="Copy mbpoll command">
+              <button class="btn btn-ghost btn-xs" data-copy-key="${key}" onclick="copyMbpollByKey(this)" title="Copy mbpoll command">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 Copy
               </button>
@@ -500,12 +557,22 @@ function renderLiveTable() {
   tbody.innerHTML = html;
 
   requestAnimationFrame(() => {
-    liveRegisters.forEach((entry, key) => {
-      renderSparkline(key);
-    });
+    for (const unitId of sortedUnitIds) {
+      for (const item of grouped[unitId]) {
+        renderSparkline(item.key);
+      }
+    }
   });
 
-  document.getElementById('live-register-count').textContent = liveRegisters.size + ' registers';
+  if (filteredKeys) {
+    document.getElementById('live-register-count').textContent =
+      filteredKeys.length + ' of ' + allSortedKeys.length + ' registers';
+  } else {
+    document.getElementById('live-register-count').textContent =
+      liveRegisters.size + ' registers';
+  }
+
+  renderPagination(totalCount);
 }
 
 function formatLiveValue(entry) {
@@ -526,12 +593,31 @@ function formatLiveValue(entry) {
 
 // ── Search / Filter ──────────────────────────────────────────
 function filterLiveTable() {
-  const q = (document.getElementById('live-search')?.value || '').toLowerCase();
-  document.querySelectorAll('#live-tbody tr').forEach(tr => {
-    if (!q) { tr.style.display = ''; return; }
-    const text = tr.textContent.toLowerCase();
-    tr.style.display = text.includes(q) ? '' : 'none';
-  });
+  const q = (document.getElementById('live-search')?.value || '').toLowerCase().trim();
+  if (!q) {
+    filteredKeys = null;
+  } else {
+    filteredKeys = allSortedKeys.filter(item => {
+      const entry = liveRegisters.get(item.key);
+      if (!entry) return false;
+      const unitStr = String(item.unitId);
+      const addrStr = String(item.address);
+      const regType = item.registerType.toLowerCase();
+      return unitStr.includes(q) || regType.includes(q) || addrStr.includes(q);
+    });
+
+    const matchedUnitIds = new Set(units
+      .filter(u => String(u.unitId).includes(q) || (u.label || '').toLowerCase().includes(q))
+      .map(u => u.unitId));
+
+    for (const item of allSortedKeys) {
+      if (matchedUnitIds.has(item.unitId) && !filteredKeys.some(f => f.key === item.key)) {
+        filteredKeys.push(item);
+      }
+    }
+  }
+  currentPage = 0;
+  renderLiveTable();
 }
 
 function filterAnomalies() {
@@ -545,8 +631,12 @@ function filterAnomalies() {
 
 function clearLiveTable() {
   liveRegisters.clear();
+  allSortedKeys = [];
+  filteredKeys = null;
+  currentPage = 0;
   document.getElementById('live-tbody').innerHTML = '';
   document.getElementById('live-register-count').textContent = '0 registers';
+  renderPagination(0);
 }
 
 // ────────────────────────────────────────────────────────────
@@ -560,15 +650,16 @@ async function refreshDashboard() {
     document.getElementById('stat-anomalies-active').textContent = serverStatus.activeAnomalyCount;
     document.getElementById('stat-anomalies-total').textContent = serverStatus.totalAnomalyCount;
     document.getElementById('stat-ws-clients').textContent = serverStatus.webSocketClients;
+    const activeIp = getActiveIpAddress();
+
     document.getElementById('dash-host').textContent = serverStatus.modbusHost;
     document.getElementById('dash-port').textContent = serverStatus.modbusPort;
-    document.getElementById('dash-ip').textContent = serverStatus.localIp || '127.0.0.1';
-    document.getElementById('dash-quick-host').textContent = serverStatus.localIp || 'localhost';
+    document.getElementById('dash-ip').textContent = activeIp;
+    document.getElementById('dash-quick-host').textContent = activeIp;
     document.getElementById('dash-quick-port').textContent = serverStatus.modbusPort;
 
     // Update connection bar in header
-    const connIp = serverStatus.localIp || '127.0.0.1';
-    document.getElementById('conn-display').textContent = connIp + ':' + serverStatus.modbusPort;
+    document.getElementById('conn-display').textContent = activeIp + ':' + serverStatus.modbusPort;
 
     const badge = document.getElementById('sim-status-badge');
     if (serverStatus.isRunning) {
@@ -602,6 +693,8 @@ async function loadUnits() {
   try {
     units = await api('GET', '/api/units');
     updateUnitSelects();
+    buildRegisterConfigLookup();
+    buildSortedKeys();
     renderLiveTable();
   } catch (e) { toast('Failed to load units: ' + e.message, 'error'); }
 }
@@ -609,13 +702,16 @@ async function loadUnits() {
 async function loadAllRegisters() {
   try {
     allRegisters = await api('GET', '/api/register-configurations');
+    buildRegisterConfigLookup();
 
     // Prune liveRegisters to only keep configured registers
     const activeKeys = new Set();
+    const strideByType = { UInt16: 1, Int16: 1, Bool: 1, UInt32: 2, Int32: 2, Float32: 2, UInt64: 4, Int64: 4, Float64: 4 };
     for (const r of allRegisters) {
       const u = units.find(unit => unit.id == r.simulatedUnitId);
       if (!u) continue;
-      for (let addr = r.startAddress; addr <= r.endAddress; addr++) {
+      const stride = strideByType[r.dataType] || 1;
+      for (let addr = r.startAddress; addr <= r.endAddress; addr += stride) {
         activeKeys.add(`${u.unitId}:${r.registerType}:${addr}`);
       }
     }
@@ -626,6 +722,7 @@ async function loadAllRegisters() {
       }
     });
 
+    buildSortedKeys();
     renderLiveTable();
   } catch (e) {
     toast('Failed to load registers: ' + e.message, 'error');
@@ -1053,8 +1150,14 @@ function dirBadge(d) {
   return 'badge-amber';
 }
 function formatDirection(a) {
-  if (a.direction === 'Increase') return `+${a.amount}%`;
-  if (a.direction === 'Decrease') return `-${a.amount}%`;
+  if (a.direction === 'Increase') {
+    const ref = a.referenceBase === 'CurrentValue' ? 'cur' : (a.referenceBase === 'Min' ? 'min' : (a.referenceBase === 'Max' ? 'max' : 'mid'));
+    return `+${a.amount}% from ${ref}`;
+  }
+  if (a.direction === 'Decrease') {
+    const ref = a.referenceBase === 'CurrentValue' ? 'cur' : (a.referenceBase === 'Min' ? 'min' : (a.referenceBase === 'Max' ? 'max' : 'mid'));
+    return `-${a.amount}% from ${ref}`;
+  }
   return `Custom`;
 }
 
@@ -1087,6 +1190,7 @@ function openAddAnomaly() {
   document.getElementById('anomaly-name-input').value = '';
   document.getElementById('anomaly-regtype-input').value = 'HoldingRegister';
   document.getElementById('anomaly-direction-input').value = 'Increase';
+  document.getElementById('anomaly-refbase-input').value = 'Midpoint';
   document.getElementById('anomaly-amount-input').value = '50';
   document.getElementById('anomaly-custom-min').value = '0';
   document.getElementById('anomaly-custom-max').value = '100';
@@ -1138,6 +1242,7 @@ function onAnomalyRegTypeChange() {
     minGroup.style.display = 'none';
     maxGroup.style.display = 'none';
     patternGroup.style.display = 'none';
+    document.getElementById('anomaly-refbase-group').style.display = 'none';
     if (recoveryInput && recoveryInput.parentElement) recoveryInput.parentElement.style.display = 'none';
 
     boolValGroup.style.display = '';
@@ -1198,15 +1303,18 @@ function onAnomalyDirectionChange() {
   const isCustom = dir === 'CustomValue';
   const customTypeGroup = document.getElementById('anomaly-custom-type-group');
   const amountLabel = document.getElementById('anomaly-amount-label');
+  const refBaseGroup = document.getElementById('anomaly-refbase-group');
 
   if (isCustom) {
     customTypeGroup.style.display = '';
+    refBaseGroup.style.display = 'none';
     onAnomalyCustomTypeChange();
   } else {
     customTypeGroup.style.display = 'none';
     document.getElementById('anomaly-custom-min-group').style.display = 'none';
     document.getElementById('anomaly-custom-max-group').style.display = 'none';
     document.getElementById('anomaly-amount-group').style.display = '';
+    refBaseGroup.style.display = '';
     if (amountLabel) amountLabel.textContent = 'Amount (%)';
   }
 }
@@ -1282,6 +1390,7 @@ async function editAnomaly(id) {
     document.getElementById('anomaly-bool-value-input').value = String(Math.round(a.amount));
   } else {
     document.getElementById('anomaly-direction-input').value = a.direction;
+    document.getElementById('anomaly-refbase-input').value = a.referenceBase || 'Midpoint';
     if (a.direction === 'CustomValue') {
       document.getElementById('anomaly-custom-type-input').value = a.customPerRegister ? 'Random' : 'Constant';
       if (!a.customPerRegister) {
@@ -1346,6 +1455,7 @@ async function saveAnomaly() {
   let customMax = 0;
   let pattern = document.getElementById('anomaly-pattern-input').value;
   let recoveryType = document.getElementById('anomaly-recovery-input').value;
+  let referenceBase = document.getElementById('anomaly-refbase-input').value;
 
   if (isBool) {
     direction = 'CustomValue';
@@ -1355,6 +1465,7 @@ async function saveAnomaly() {
     customMax = 1;
     pattern = 'InstantSpike';
     recoveryType = 'Immediate';
+    referenceBase = 'Midpoint';
   } else {
     if (direction === 'CustomValue') {
       const type = document.getElementById('anomaly-custom-type-input').value;
@@ -1391,6 +1502,7 @@ async function saveAnomaly() {
     startAddress: parseInt(document.getElementById('anomaly-start-input').value) || 0,
     endAddress: parseInt(document.getElementById('anomaly-end-input').value) || 0,
     direction,
+    referenceBase,
     amount,
     customPerRegister,
     customMin,
@@ -1690,10 +1802,28 @@ function formatAddressShort(type, startAddr, endAddr) {
 }
 function getUnitById(id) { return units.find(u => u.id === id); }
 
-function getMbpollCommand(unitId, regType, startAddr, endAddr, dataType) {
-  let typeFlag = '3';
-  if (regType === 'HoldingRegister') typeFlag = '3';
-  else if (regType === 'InputRegister') typeFlag = '4';
+function isDockerSubnetIp(ip) {
+  if (!ip) return true;
+  if (ip === '0.0.0.0' || ip === '::') return true;
+  const parts = ip.split('.').map(Number);
+  if (parts.length === 4 && parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+  if (parts.length === 4 && parts[0] === 10 && parts[1] === 255) return true;
+  return false;
+}
+
+function getActiveIpAddress() {
+  const host = location.hostname;
+  const isHostLocal = !host || host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  if (!isHostLocal && !isDockerSubnetIp(host)) return host;
+  const statusIp = serverStatus?.localIp;
+  if (statusIp && !isDockerSubnetIp(statusIp)) return statusIp;
+  return (!isHostLocal && host) ? host : '127.0.0.1';
+}
+
+function getMbpollCommand(unitId, regType, startAddr, endAddr, dataType, byteOrder) {
+  let typeFlag = '4';
+  if (regType === 'HoldingRegister') typeFlag = '4';
+  else if (regType === 'InputRegister') typeFlag = '3';
   else if (regType === 'Coil') typeFlag = '0';
   else if (regType === 'DiscreteInput') typeFlag = '1';
 
@@ -1706,13 +1836,38 @@ function getMbpollCommand(unitId, regType, startAddr, endAddr, dataType) {
   const count = Math.floor((end - startAddr) / regSize) + 1;
   const startReg = startAddr + 1;
 
-  const ip = serverStatus?.localIp || '127.0.0.1';
+  const ip = getActiveIpAddress();
   const port = serverStatus?.modbusPort || '502';
-  return `mbpoll -m tcp -a ${unitId} -p ${port} -t ${typeFlag} -r ${startReg} -c ${count} ${ip}`;
+
+  // Only include -B (Big Endian Motorola) flag if byteOrder is BigEndian or unspecified.
+  // mbpoll defaults to Little Endian Intel (CDAB/WordSwap) when -B is omitted.
+  const isBigEndian = !byteOrder || byteOrder === 'BigEndian';
+  const endianFlag = isBigEndian ? ' -B' : '';
+
+  return `mbpoll -m tcp -a ${unitId} -p ${port} -t ${typeFlag}${endianFlag} -r ${startReg} -c ${count} ${ip}`;
 }
 
-function copyMbpollCommand(unitId, regType, startAddr, endAddr, dataType) {
-  const cmd = getMbpollCommand(unitId, regType, startAddr, endAddr, dataType);
+function copyMbpollCommand(unitId, regType, startAddr, endAddr, dataType, byteOrder) {
+  const cmd = getMbpollCommand(unitId, regType, startAddr, endAddr, dataType, byteOrder);
+  copyToClipboard(cmd).then(() => {
+    toast('Copied mbpoll command!', 'success');
+  }).catch(() => {
+    prompt('Copy mbpoll command:', cmd);
+  });
+}
+
+// Runtime lookup version — always reads the CURRENT data type from registerConfigLookup
+function copyMbpollByKey(btn) {
+  const key = btn.dataset.copyKey;
+  if (!key) return;
+  const entry = liveRegisters.get(key);
+  if (!entry) return;
+  // Re-read data type and byte order from the latest register config (updated after every Edit save)
+  const regCfg = findRegisterConfig(entry.unitId, entry.registerType, entry.address);
+  const dataType = regCfg?.dataType || entry.dataType || 'UInt16';
+  const byteOrder = regCfg?.byteOrder || 'BigEndian';
+  const endAddr = regCfg ? regCfg.endAddress : entry.address;
+  const cmd = getMbpollCommand(entry.unitId, entry.registerType, entry.address, endAddr, dataType, byteOrder);
   copyToClipboard(cmd).then(() => {
     toast('Copied mbpoll command!', 'success');
   }).catch(() => {

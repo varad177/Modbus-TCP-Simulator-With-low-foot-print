@@ -30,6 +30,8 @@ public enum RecoveryType { Immediate, Gradual }
 
 public enum TriggerMode { OnDemand, Scheduled }
 
+public enum ReferenceBase { Midpoint, Min, Max, CurrentValue }
+
 // ── Entities ───────────────────────────────────────────────────────────────────
 
 public class SimulatedUnit
@@ -85,6 +87,7 @@ public class AnomalyConfiguration
 
     // Anomaly behaviour
     public AnomalyDirection Direction { get; set; }
+    public ReferenceBase ReferenceBase { get; set; } = ReferenceBase.Midpoint;
     public double Amount { get; set; }              // % for Inc/Dec, absolute for Custom
     public bool CustomPerRegister { get; set; }     // if Custom: same or independent per reg
     public double CustomMin { get; set; }
@@ -113,6 +116,7 @@ public class ActiveAnomaly
     public AnomalyConfiguration Config { get; set; } = null!;
     public Dictionary<ushort, double> BaseValues { get; set; } = new();
     public double MidpointValue { get; set; }
+    public RegisterConfiguration? MatchedRegConfig { get; set; }
     public DataType DataType { get; set; } = DataType.Float32;
     public ByteOrder ByteOrder { get; set; } = ByteOrder.BigEndian;
 

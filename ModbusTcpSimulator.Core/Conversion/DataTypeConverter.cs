@@ -82,21 +82,25 @@ public static class DataTypeConverter
 
     private static ushort[] ApplyWordOrder(ushort[] words, ByteOrder order)
     {
-        if (words.Length <= 1 || order == ByteOrder.BigEndian)
+        if (words.Length <= 1)
             return words;
 
         var result = (ushort[])words.Clone();
 
-        if (order == ByteOrder.LittleEndian)
+        if (order == ByteOrder.BigEndian)
         {
+            // Standard Modbus TCP (Big-Endian): High Word comes first (Register 0 = High Word, Register 1 = Low Word)
             Array.Reverse(result);
-            // Also swap bytes within each word
+        }
+        else if (order == ByteOrder.LittleEndian)
+        {
+            // Low word first, and swap bytes within each 16-bit word
             for (int i = 0; i < result.Length; i++)
                 result[i] = (ushort)((result[i] >> 8) | (result[i] << 8));
         }
         else if (order == ByteOrder.WordSwap)
         {
-            Array.Reverse(result);
+            // Low word first, Big-Endian bytes per word (BitConverter default order)
         }
 
         return result;

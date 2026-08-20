@@ -18,7 +18,7 @@ public static class AnomalyEndpoints
             var result = all.Select(a => new
             {
                 a.Id, a.Name, a.Enabled, a.SimulatedUnitId, a.RegisterType,
-                a.StartAddress, a.EndAddress, a.Direction, a.Amount, a.Pattern,
+                a.StartAddress, a.EndAddress, a.Direction, a.ReferenceBase, a.Amount, a.Pattern,
                 a.RecoveryType, a.DurationSeconds, a.TriggerMode,
                 a.ScheduleIntervalSeconds, a.IsScheduleEnabled, a.LastTriggered,
                 a.CustomPerRegister, a.CustomMin, a.CustomMax,
@@ -71,6 +71,8 @@ public static class AnomalyEndpoints
                 StartAddress = req.StartAddress,
                 EndAddress = req.EndAddress,
                 Direction = direction,
+                ReferenceBase = req.Direction is AnomalyDirection.Increase or AnomalyDirection.Decrease
+                    ? req.ReferenceBase : ReferenceBase.Midpoint,
                 Amount = amount,
                 CustomPerRegister = req.CustomPerRegister,
                 CustomMin = customMin,
@@ -116,6 +118,8 @@ public static class AnomalyEndpoints
             existing.StartAddress = req.StartAddress;
             existing.EndAddress = req.EndAddress;
             existing.Direction = direction;
+            existing.ReferenceBase = req.Direction is AnomalyDirection.Increase or AnomalyDirection.Decrease
+                ? req.ReferenceBase : ReferenceBase.Midpoint;
             existing.Amount = req.Amount;
             existing.CustomPerRegister = req.CustomPerRegister;
             existing.CustomMin = customMin;
@@ -185,6 +189,7 @@ public record CreateAnomalyRequest(
     ushort StartAddress,
     ushort EndAddress,
     AnomalyDirection Direction = AnomalyDirection.Increase,
+    ReferenceBase ReferenceBase = ReferenceBase.Midpoint,
     double Amount = 10,
     bool CustomPerRegister = false,
     double CustomMin = 0,

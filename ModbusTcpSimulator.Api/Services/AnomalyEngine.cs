@@ -136,14 +136,17 @@ public sealed class AnomalyEngine : BackgroundService
             var unit = await _unitRepo.GetByIdAsync(active.Config.SimulatedUnitId);
             if (unit is null) continue;
 
-            var regCfg = active.RecoveryRegConfig;
-            if (regCfg is null) continue;
             int stride = Math.Max(1, DataTypeConverter.RegisterCount(active.DataType));
 
             for (ushort addr = active.Config.StartAddress; addr <= active.Config.EndAddress; addr = (ushort)(addr + stride))
             {
                 active.RecoveryStartValues.TryGetValue(addr, out var fromVal);
-                active.RecoveryTargetValues.TryGetValue(addr, out var toVal);
+                
+                if (!active.RecoveryTargetValues.TryGetValue(addr, out var toVal))
+                {
+                    active.BaseValues.TryGetValue(addr, out toVal);
+                }
+
                 double recovered = fromVal + (toVal - fromVal) * progress;
 
                 if (active.DataType is DataType.Int16 or DataType.UInt16 or DataType.Int32
@@ -241,6 +244,7 @@ public sealed class AnomalyEngine : BackgroundService
             Config = config,
             BaseValues = baseValues,
             MidpointValue = midpoint,
+            MatchedRegConfig = matchingReg,
             DataType = dataType,
             ByteOrder = byteOrder
         };
@@ -261,9 +265,21 @@ public sealed class AnomalyEngine : BackgroundService
         int stride = Math.Max(1, DataTypeConverter.RegisterCount(dataType));
         for (ushort addr = config.StartAddress; addr <= config.EndAddress; addr = (ushort)(addr + stride))
         {
-            var words = _state.GetWords(unitId, config.RegisterType, addr);
-            if (words != null)
+            var words = new ushort[stride];
+            bool hasValue = false;
+            for (int i = 0; i < stride; i++)
+            {
+                var w = _state.GetWords(unitId, config.RegisterType, (ushort)(addr + i));
+                if (w != null && w.Length > 0)
+                {
+                    words[i] = w[0];
+                    hasValue = true;
+                }
+            }
+            if (hasValue)
+            {
                 result[addr] = DataTypeConverter.Decode(words, dataType, byteOrder);
+            }
         }
         return result;
     }
@@ -271,25 +287,67 @@ public sealed class AnomalyEngine : BackgroundService
     /// <summary>Transition an active anomaly into gradual recovery mode.</summary>
     private async Task BeginRecoveryAsync(ActiveAnomaly active, DateTime now)
     {
+        var unit = await _unitRepo.GetByIdAsync(active.Config.SimulatedUnitId);
+        if (unit is null) return;
+
         var regs = await _regRepo.GetByUnitIdAsync(active.Config.SimulatedUnitId);
         var regCfg = regs.FirstOrDefault(r =>
             r.RegisterType == active.Config.RegisterType &&
             r.StartAddress <= active.Config.StartAddress &&
             r.EndAddress >= active.Config.EndAddress);
 
-        // Snapshot current values as the interpolation start point
-        var startValues = SnapshotBaseValues(
-            (await _unitRepo.GetByIdAsync(active.Config.SimulatedUnitId))!.UnitId,
-            active.Config, active.DataType, active.ByteOrder);
+        int stride = Math.Max(1, DataTypeConverter.RegisterCount(active.DataType));
 
-        // Generate the target fresh values we're interpolating toward
-        var targetValues = new Dictionary<ushort, double>();
-        if (regCfg != null)
+        // Snapshot current values from state (these are the anomaly values, e.g. 200)
+        // Use as recovery start point; fall back to last anomaly-computed value via BaseValues
+        var startValues = new Dictionary<ushort, double>();
+        for (ushort addr = active.Config.StartAddress; addr <= active.Config.EndAddress; addr = (ushort)(addr + stride))
         {
-            var gen = new ValueGenerator(regCfg);
-            int stride = Math.Max(1, DataTypeConverter.RegisterCount(active.DataType));
-            for (ushort addr = active.Config.StartAddress; addr <= active.Config.EndAddress; addr = (ushort)(addr + stride))
+            var words = new ushort[stride];
+            bool hasValue = false;
+            for (int i = 0; i < stride; i++)
+            {
+                var w = _state.GetWords(unit.UnitId, active.Config.RegisterType, (ushort)(addr + i));
+                if (w != null && w.Length > 0)
+                {
+                    words[i] = w[0];
+                    hasValue = true;
+                }
+            }
+
+            if (hasValue)
+            {
+                startValues[addr] = DataTypeConverter.Decode(words, active.DataType, active.ByteOrder);
+            }
+            else
+            {
+                // No value in state yet — use the anomaly-targeted value we would have written
+                startValues[addr] = active.BaseValues.TryGetValue(addr, out var bv)
+                    ? bv * (1.0 + active.Config.Amount / 100.0) // approximate anomaly value
+                    : 0;
+            }
+        }
+
+        // Target: the fresh normal simulation values to interpolate back toward.
+        // Prefer a freshly generated value from the generator (so recovery ends at a realistic value).
+        // Fall back to the pre-anomaly BaseValues snapshot if no regCfg available.
+        var targetValues = new Dictionary<ushort, double>();
+        var gen = regCfg != null ? new ValueGenerator(regCfg) : null;
+        for (ushort addr = active.Config.StartAddress; addr <= active.Config.EndAddress; addr = (ushort)(addr + stride))
+        {
+            if (gen != null)
+            {
                 targetValues[addr] = gen.Next();
+            }
+            else if (active.BaseValues.TryGetValue(addr, out var baseVal))
+            {
+                targetValues[addr] = baseVal;
+            }
+            else
+            {
+                // Last resort: use start value so at minimum nothing changes abruptly
+                targetValues[addr] = startValues.TryGetValue(addr, out var sv) ? sv : 0;
+            }
         }
 
         active.IsRecovering = true;
@@ -335,10 +393,22 @@ public sealed class AnomalyEngine : BackgroundService
 
         for (ushort addr = cfg.StartAddress; addr <= cfg.EndAddress; addr = (ushort)(addr + stride))
         {
-            // Use midpoint for Increase/Decrease, live value for CustomValue
-            double baseValue = cfg.Direction == AnomalyDirection.CustomValue
-                ? (active.BaseValues.TryGetValue(addr, out var bv) ? bv : 0)
-                : active.MidpointValue;
+            // Use ReferenceBase for Increase/Decrease, live value for CustomValue
+            double baseValue;
+            if (cfg.Direction == AnomalyDirection.CustomValue)
+            {
+                baseValue = active.BaseValues.TryGetValue(addr, out var bv) ? bv : 0;
+            }
+            else
+            {
+                baseValue = cfg.ReferenceBase switch
+                {
+                    ReferenceBase.Min => active.MatchedRegConfig?.MinValue ?? active.MidpointValue,
+                    ReferenceBase.Max => active.MatchedRegConfig?.MaxValue ?? active.MidpointValue,
+                    ReferenceBase.CurrentValue => active.BaseValues.TryGetValue(addr, out var cv) ? cv : active.MidpointValue,
+                    _ => active.MidpointValue
+                };
+            }
 
             double targetValue = cfg.Direction switch
             {

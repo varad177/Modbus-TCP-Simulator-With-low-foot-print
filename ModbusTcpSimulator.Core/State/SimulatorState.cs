@@ -27,15 +27,19 @@ public sealed class SimulatorState
     public IEnumerable<byte> GetUnitIds() => _units.Keys;
 
     /// <summary>Write a value — simulation uses this, respects anomaly locks.</summary>
-    public bool SetValue(byte unitId, RegisterType type, ushort address, ushort[] words, double logicalValue)
+   public bool SetValue(byte unitId, RegisterType type, ushort address, ushort[] words, double logicalValue)
+{
+    var unit = GetOrAddUnit(unitId);
+    for (int i = 0; i < words.Length; i++)
     {
-        var key = new RegisterKey(unitId, type, address);
-        if (_anomalyLocks.ContainsKey(key)) return false; // anomaly owns this address
-        var unit = GetOrAddUnit(unitId);
-        unit.SetWords(type, address, words);
-        _pendingChanges[key] = logicalValue;
-        return true;
+        var addr = (ushort)(address + i);
+        if (_anomalyLocks.ContainsKey(new RegisterKey(unitId, type, addr)))
+            return false; // some word in this group is anomaly-locked
     }
+    unit.SetWords(type, address, words);
+    _pendingChanges[new RegisterKey(unitId, type, address)] = logicalValue;
+    return true;
+}
 
     /// <summary>Force-write a value regardless of anomaly lock (used by AnomalyEngine).</summary>
     public void ForceSetValue(byte unitId, RegisterType type, ushort address, ushort[] words, double logicalValue)
@@ -112,11 +116,15 @@ public sealed class UnitState
         _ => throw new ArgumentOutOfRangeException()
     };
 
-    public void SetWords(RegisterType type, ushort address, ushort[] words) =>
-        _banks[BankIndex(type)][address] = words;
+    public void SetWords(RegisterType type, ushort address, ushort[] words)
+{
+    var bank = _banks[BankIndex(type)];
+    for (int i = 0; i < words.Length; i++)
+        bank[(ushort)(address + i)] = new[] { words[i] };
+}
 
     public ushort[]? GetWords(RegisterType type, ushort address) =>
-        _banks[BankIndex(type)].TryGetValue(address, out var w) ? w : null;
+    _banks[BankIndex(type)].TryGetValue(address, out var w) ? w : null;
 
     // NModbus server data store helpers
     public bool GetCoil(ushort address) =>

@@ -7,7 +7,7 @@
   <meta name="description" content="Production-quality Modbus TCP simulator with live WebSocket register monitoring, anomaly injection, and multi-unit support.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="app.css?v=1.0.16">
+  <link rel="stylesheet" href="app.css?v=1.1.5">
 </head>
 <body>
 
@@ -202,6 +202,7 @@
             <tbody id="live-tbody"></tbody>
           </table>
         </div>
+        <div id="live-pagination" class="pagination-controls"></div>
       </div>
     </section>
 
@@ -395,10 +396,7 @@
                 <option value="Int16">INT16 (1 register)</option>
                 <option value="UInt32">UINT32 (2 registers)</option>
                 <option value="Int32">INT32 (2 registers)</option>
-                <option value="Float32" selected>FLOAT32 (2 registers)</option>
-                <option value="UInt64">UINT64 (4 registers)</option>
-                <option value="Int64">INT64 (4 registers)</option>
-                <option value="Float64">FLOAT64 (4 registers)</option>
+                <option value="Float32" selected>FLOAT32 (2 registers)</option>         
                 <option value="Bool">BOOL (1 register)</option>
               </select>
             </div>
@@ -490,6 +488,15 @@
             <option value="Increase">Increase</option>
             <option value="Decrease">Decrease</option>
             <option value="CustomValue">Custom Value</option>
+          </select>
+        </div>
+        <div class="form-group" id="anomaly-refbase-group">
+          <label>Reference Base</label>
+          <select id="anomaly-refbase-input">
+            <option value="Midpoint">Midpoint (default)</option>
+            <option value="Min">Min Value</option>
+            <option value="Max">Max Value</option>
+            <option value="CurrentValue">Current Value (at trigger)</option>
           </select>
         </div>
         <div class="form-group" id="anomaly-bool-value-group" style="display:none">
@@ -624,6 +631,6 @@
   </div>
 </div>
 
-<script src="app.js?v=1.0.16"></script>
+<script src="app.js?v=1.1.5"></script>
 </body>
 </html>

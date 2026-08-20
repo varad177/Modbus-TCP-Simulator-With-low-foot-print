@@ -1,4 +1,5 @@
 using ModbusTcpSimulator.Core.Models;
+using ModbusTcpSimulator.Core.Conversion;
 using ModbusTcpSimulator.Core.Persistence;
 using ModbusTcpSimulator.Api.Services;
 
@@ -180,8 +181,9 @@ public static class RegisterEndpoints
             // Delete the original range
             await repo.DeleteAsync(id);
 
-            // Create individual configs for each address
-            for (ushort addr = existing.StartAddress; addr <= existing.EndAddress; addr++)
+            // Create individual configs for each logical register
+            int stride = Math.Max(1, DataTypeConverter.RegisterCount(existing.DataType));
+            for (ushort addr = existing.StartAddress; addr <= existing.EndAddress; addr = (ushort)(addr + stride))
             {
                 var cfg = new RegisterConfiguration
                 {

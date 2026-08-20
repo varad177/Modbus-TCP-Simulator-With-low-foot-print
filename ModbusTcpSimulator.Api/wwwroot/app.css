@@ -985,6 +985,32 @@ details.advanced-settings[open] summary {
   border-color: var(--c-red);
 }
 
+/* ── Pagination ──────────────────────────────────────────────────── */
+.pagination-controls {
+  padding: 12px 16px;
+  border-top: 1px solid var(--c-border);
+  display: flex;
+  justify-content: center;
+  position: sticky;
+  bottom: 0;
+  background: var(--c-surface);
+  z-index: 10;
+}
+.pagination-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pagination-info {
+  font-size: 13px;
+  color: var(--c-text-secondary);
+  padding: 0 12px;
+}
+.pagination-row .btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 /* ── Mobile ────────────────────────────────────────────────────────── */
 .hamburger {
   display: none; background: none; border: none; color: var(--c-text-primary);

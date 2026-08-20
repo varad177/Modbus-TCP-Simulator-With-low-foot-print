@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using ModbusTcpSimulator.Api.Services;
+using ModbusTcpSimulator.Core.Conversion;
 using ModbusTcpSimulator.Core.Persistence;
 using ModbusTcpSimulator.Core.State;
 
@@ -40,7 +41,11 @@ public static class SimulatorEndpoints
                 modbusPort = config["Modbus:Port"] ?? "502",
                 localIp,
                 unitCount = units.Count(),
-                registerCount = regs.Count(),
+                registerCount = regs.Sum(r =>
+                {
+                    int stride = Math.Max(1, DataTypeConverter.RegisterCount(r.DataType));
+                    return (r.EndAddress - r.StartAddress) / stride + 1;
+                }),
                 activeAnomalyCount = anomalyEngine.ActiveAnomalies.Count,
                 totalAnomalyCount = anomalies.Count(),
                 webSocketClients = broadcaster.ClientCount
@@ -66,25 +71,39 @@ public static class SimulatorEndpoints
         try
         {
             using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            // Connect to an external address to determine the local IP (no actual data is sent)
             socket.Connect("8.8.8.8", 80);
             if (socket.LocalEndPoint is IPEndPoint endPoint)
-                return endPoint.Address.ToString();
+            {
+                if (!IsDockerSubnetIp(endPoint.Address))
+                    return endPoint.Address.ToString();
+            }
         }
         catch { }
 
-        // Fallback: enumerate network interfaces
         try
         {
             var host = Dns.GetHostEntry(Dns.GetHostName());
             foreach (var ip in host.AddressList)
             {
-                if (ip.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ip))
+                if (ip.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ip) && !IsDockerSubnetIp(ip))
                     return ip.ToString();
             }
         }
         catch { }
 
         return "127.0.0.1";
+    }
+
+    private static bool IsDockerSubnetIp(IPAddress ip)
+    {
+        var bytes = ip.GetAddressBytes();
+        if (bytes.Length == 4)
+        {
+            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+                return true;
+            if (bytes[0] == 10 && bytes[1] == 255)
+                return true;
+        }
+        return false;
     }
 }

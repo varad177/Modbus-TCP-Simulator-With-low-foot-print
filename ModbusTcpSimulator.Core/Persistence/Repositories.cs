@@ -175,11 +175,11 @@ public sealed class AnomalyRepository : IAnomalyRepository
         return await conn.ExecuteScalarAsync<int>(
             @"INSERT INTO AnomalyConfigurations
               (Name, Enabled, SimulatedUnitId, RegisterType, StartAddress, EndAddress,
-               Direction, Amount, CustomPerRegister, CustomMin, CustomMax,
+               Direction, ReferenceBase, Amount, CustomPerRegister, CustomMin, CustomMax,
                Pattern, RecoveryType, DurationSeconds, TriggerMode, ScheduleIntervalSeconds, IsScheduleEnabled)
               VALUES
               (@Name, @Enabled, @SimulatedUnitId, @RegisterType, @StartAddress, @EndAddress,
-               @Direction, @Amount, @CustomPerRegister, @CustomMin, @CustomMax,
+               @Direction, @ReferenceBase, @Amount, @CustomPerRegister, @CustomMin, @CustomMax,
                @Pattern, @RecoveryType, @DurationSeconds, @TriggerMode, @ScheduleIntervalSeconds, @IsScheduleEnabled);
               SELECT last_insert_rowid();", anomaly);
     }
@@ -191,7 +191,7 @@ public sealed class AnomalyRepository : IAnomalyRepository
             @"UPDATE AnomalyConfigurations SET
               Name=@Name, Enabled=@Enabled, SimulatedUnitId=@SimulatedUnitId,
               RegisterType=@RegisterType, StartAddress=@StartAddress, EndAddress=@EndAddress,
-              Direction=@Direction, Amount=@Amount, CustomPerRegister=@CustomPerRegister,
+              Direction=@Direction, ReferenceBase=@ReferenceBase, Amount=@Amount, CustomPerRegister=@CustomPerRegister,
               CustomMin=@CustomMin, CustomMax=@CustomMax, Pattern=@Pattern,
               RecoveryType=@RecoveryType, DurationSeconds=@DurationSeconds,
               TriggerMode=@TriggerMode, ScheduleIntervalSeconds=@ScheduleIntervalSeconds,

@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS AnomalyConfigurations (
     StartAddress            INTEGER NOT NULL,
     EndAddress              INTEGER NOT NULL,
     Direction               INTEGER NOT NULL DEFAULT 0,
+    ReferenceBase           INTEGER NOT NULL DEFAULT 0,
     Amount                  REAL    NOT NULL DEFAULT 10,
     CustomPerRegister       INTEGER NOT NULL DEFAULT 0,
     CustomMin               REAL    NOT NULL DEFAULT 0,
@@ -76,5 +77,13 @@ CREATE TABLE IF NOT EXISTS AnomalyConfigurations (
 );
 ";
         await cmd.ExecuteNonQueryAsync();
+
+        // Migration: add ReferenceBase column if missing (for existing databases)
+        try
+        {
+            cmd.CommandText = "ALTER TABLE AnomalyConfigurations ADD COLUMN ReferenceBase INTEGER NOT NULL DEFAULT 0";
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (SqliteException) { /* column already exists */ }
     }
 }
